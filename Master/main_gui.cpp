@@ -1440,6 +1440,14 @@ INT_PTR CALLBACK TerminalDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             // 发送关闭命令
             SendSimpleCommand(clientId, CMD_TERMINAL_CLOSE);
             
+            // 重置客户端的终端对话框句柄
+            {
+                std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                if (g_Clients.count(clientId)) {
+                    g_Clients[clientId]->hTerminalDlg = NULL;
+                }
+            }
+            
             RemoveWindowSubclass(GetDlgItem(hDlg, IDC_EDIT_TERM_OUT), TerminalOutEditProc, 0);
             EndDialog(hDlg, LOWORD(wParam));
             dlgToClientId.erase(hDlg);
@@ -1450,6 +1458,14 @@ INT_PTR CALLBACK TerminalDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
     case WM_CLOSE: {
         uint32_t clientId = dlgToClientId[hDlg];
         SendSimpleCommand(clientId, CMD_TERMINAL_CLOSE);
+
+        // 重置客户端的终端对话框句柄
+        {
+            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+            if (g_Clients.count(clientId)) {
+                g_Clients[clientId]->hTerminalDlg = NULL;
+            }
+        }
 
         RemoveWindowSubclass(GetDlgItem(hDlg, IDC_EDIT_TERM_OUT), TerminalOutEditProc, 0);
         EndDialog(hDlg, 0);
@@ -3341,6 +3357,10 @@ void NetworkThread() {
             client->active = true;
             client->hScreen = NULL;
             client->isMonitoring = false;
+            client->hProcessDlg = NULL;
+            client->hModuleDlg = NULL;
+            client->hTerminalDlg = NULL;
+            client->hWindowDlg = NULL;
             uint32_t id = g_NextClientId++;
             {
                 std::lock_guard<std::mutex> lock(g_ClientsMutex);

