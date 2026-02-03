@@ -125,6 +125,8 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
             DWORD dwErr = GetLastError();
             if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) {
                 // Pipe broken, likely process exited - will be detected in next iteration
+                // Add small sleep to prevent tight loop if process handle is invalid
+                Sleep(50);
                 continue;
             }
             Sleep(10);
