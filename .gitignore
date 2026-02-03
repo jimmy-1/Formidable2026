@@ -1,0 +1,33 @@
+﻿# Visual Studio 临时文件
+.vs/
+Debug/
+Release/
+x64/
+x86/
+*.user
+*.aps
+*.opendb
+*.pdb
+*.obj
+*.log
+*.tlog
+*.lastbuildstate
+*.idb
+*.recipe
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+
+# 项目管理/无关文件
+.trae/
+Formidable 2026 开发计划.txt
+
+# 各子工程下的中间目录
+**/Intermediate/
+**/bin/
+**/obj/
+
+# 根目录下的二进制输出
+/Formidable2026/
