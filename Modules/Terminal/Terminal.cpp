@@ -86,7 +86,7 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
             if (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE) {
                 // Process has exited
                 char codeMsg[128];
-                wsprintfA(codeMsg, "[System] cmd.exe 进程已退出 (Exit Code: %d)\r\n", exitCode);
+                snprintf(codeMsg, sizeof(codeMsg), "[System] cmd.exe 进程已退出 (Exit Code: %d)\r\n", exitCode);
                 SendResponse(g_socket, CMD_TERMINAL_DATA, codeMsg, (int)strlen(codeMsg));
                 
                 // Auto-restart the terminal process
@@ -94,12 +94,18 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
                 SendResponse(g_socket, CMD_TERMINAL_DATA, restartMsg.c_str(), (int)restartMsg.size());
                 
                 // Close old handles
-                if (hReadPipeOut) CloseHandle(hReadPipeOut);
-                if (hWritePipeIn) CloseHandle(hWritePipeIn);
-                CloseHandle(hProcess);
-                hReadPipeOut = NULL;
-                hWritePipeIn = NULL;
-                hProcess = NULL;
+                if (hReadPipeOut) {
+                    CloseHandle(hReadPipeOut);
+                    hReadPipeOut = NULL;
+                }
+                if (hWritePipeIn) {
+                    CloseHandle(hWritePipeIn);
+                    hWritePipeIn = NULL;
+                }
+                if (hProcess) {
+                    CloseHandle(hProcess);
+                    hProcess = NULL;
+                }
                 
                 // Restart cmd.exe process without creating new thread
                 if (!StartCmdProcess(g_socket)) {
@@ -118,10 +124,7 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
         } else {
             DWORD dwErr = GetLastError();
             if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) {
-                // Pipe broken, likely process exited
-                std::string pipeMsg = "[System] 管道断开，检测进程状态...\r\n";
-                SendResponse(g_socket, CMD_TERMINAL_DATA, pipeMsg.c_str(), (int)pipeMsg.size());
-                Sleep(100); // Give time for process exit to be detected
+                // Pipe broken, likely process exited - will be detected in next iteration
                 continue;
             }
             Sleep(10);
