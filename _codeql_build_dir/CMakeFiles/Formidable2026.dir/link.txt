@@ -1,1 +1,0 @@
-/home/runner/work/Formidable2026/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/Formidable2026.dir/link.d CMakeFiles/Formidable2026.dir/Master/main_gui.cpp.o -o /home/runner/work/Formidable2026/Formidable2026/Formidable2026/x64/Formidable2026  -lws2_32 -lcomctl32 -lshell32
