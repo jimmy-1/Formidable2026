@@ -36,6 +36,9 @@ static HANDLE hThreadRead = NULL;
 static SOCKET g_socket = INVALID_SOCKET;
 static bool bRunning = false;
 
+// 常量定义
+const DWORD PIPE_ERROR_RETRY_DELAY_MS = 50; // Delay when pipe is broken to prevent tight loop
+
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     PkgHeader header;
     memcpy(header.flag, "FRMD26?", 7);
@@ -86,8 +89,10 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
             if (GetExitCodeProcess(hProcess, &exitCode) && exitCode != STILL_ACTIVE) {
                 // Process has exited
                 char codeMsg[128];
-                snprintf(codeMsg, sizeof(codeMsg), "[System] cmd.exe 进程已退出 (Exit Code: %d)\r\n", exitCode);
-                SendResponse(g_socket, CMD_TERMINAL_DATA, codeMsg, (int)strlen(codeMsg));
+                int written = snprintf(codeMsg, sizeof(codeMsg), "[System] cmd.exe 进程已退出 (Exit Code: %d)\r\n", exitCode);
+                if (written > 0 && written < (int)sizeof(codeMsg)) {
+                    SendResponse(g_socket, CMD_TERMINAL_DATA, codeMsg, written);
+                }
                 
                 // Auto-restart the terminal process
                 std::string restartMsg = "[System] 正在自动重启终端...\r\n\r\n";
@@ -126,7 +131,7 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
             if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) {
                 // Pipe broken, likely process exited - will be detected in next iteration
                 // Add small sleep to prevent tight loop if process handle is invalid
-                Sleep(50);
+                Sleep(PIPE_ERROR_RETRY_DELAY_MS);
                 continue;
             }
             Sleep(10);
