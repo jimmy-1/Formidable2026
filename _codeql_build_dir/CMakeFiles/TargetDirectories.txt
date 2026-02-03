@@ -1,0 +1,12 @@
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/Formidable2026.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/Client.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleSystemInfo.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleFileManager.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleProcessManager.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleTerminal.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleServiceManager.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleWindowManager.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleRegistryManager.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/ModuleMultimedia.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/edit_cache.dir
+/home/runner/work/Formidable2026/Formidable2026/_codeql_build_dir/CMakeFiles/rebuild_cache.dir
