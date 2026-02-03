@@ -31,3 +31,7 @@ Formidable 2026 开发计划.txt
 
 # 根目录下的二进制输出
 /Formidable2026/
+
+# CodeQL 构建目录
+_codeql_build_dir/
+_codeql_detected_source_root
