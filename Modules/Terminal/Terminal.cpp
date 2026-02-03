@@ -87,6 +87,8 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
             DWORD dwErr = GetLastError();
             if (dwErr == ERROR_BROKEN_PIPE || dwErr == ERROR_INVALID_HANDLE) {
                 // Pipe broken or invalid handle - terminal process has likely exited
+                std::string pipeMsg = "[System] 终端进程已退出。\r\n";
+                SendResponse(g_socket, CMD_TERMINAL_DATA, pipeMsg.c_str(), (int)pipeMsg.size());
                 break;
             }
             Sleep(10);
