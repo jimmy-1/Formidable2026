@@ -122,6 +122,59 @@ uint32_t g_NextClientId = 1;
 HFONT g_hTermFont = NULL;
 HBRUSH g_hTermEditBkBrush = NULL;
 
+// 列表排序相关
+struct ListViewSortInfo {
+    int column;
+    bool ascending;
+    HWND hwndList;
+};
+std::map<HWND, ListViewSortInfo> g_SortInfo;
+
+// 列表排序比较函数
+int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort) {
+    ListViewSortInfo* psi = (ListViewSortInfo*)lParamSort;
+    HWND hList = psi->hwndList;
+    int col = psi->column;
+    bool asc = psi->ascending;
+    
+    wchar_t text1[512] = { 0 };
+    wchar_t text2[512] = { 0 };
+    
+    LVITEMW lvi1 = { 0 };
+    lvi1.mask = LVIF_TEXT;
+    lvi1.iItem = (int)lParam1;
+    lvi1.iSubItem = col;
+    lvi1.pszText = text1;
+    lvi1.cchTextMax = 512;
+    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)lParam1, (LPARAM)&lvi1);
+    
+    LVITEMW lvi2 = { 0 };
+    lvi2.mask = LVIF_TEXT;
+    lvi2.iItem = (int)lParam2;
+    lvi2.iSubItem = col;
+    lvi2.pszText = text2;
+    lvi2.cchTextMax = 512;
+    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)lParam2, (LPARAM)&lvi2);
+    
+    // 尝试数字比较
+    wchar_t* end1 = nullptr;
+    wchar_t* end2 = nullptr;
+    long long num1 = wcstoll(text1, &end1, 10);
+    long long num2 = wcstoll(text2, &end2, 10);
+    
+    int result = 0;
+    if (end1 != text1 && end2 != text2 && *end1 == L'\0' && *end2 == L'\0') {
+        // 纯数字比较
+        if (num1 < num2) result = -1;
+        else if (num1 > num2) result = 1;
+    } else {
+        // 字符串比较
+        result = _wcsicmp(text1, text2);
+    }
+    
+    return asc ? result : -result;
+}
+
 // --- 设置持久化 ---
 void LoadSettings() {
     wchar_t szPath[MAX_PATH];
@@ -791,6 +844,37 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         HandleCommand(hWnd, LOWORD(wParam));
         break;
     }
+    case WM_NOTIFY: {
+        LPNMHDR nm = (LPNMHDR)lParam;
+        if (nm->idFrom == IDC_LIST_CLIENTS && nm->code == LVN_COLUMNCLICK) {
+            LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+            HWND hList = g_hListClients;
+            
+            if (!g_SortInfo.count(hList)) {
+                g_SortInfo[hList] = { 0, true, hList };
+            }
+            
+            if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+            } else {
+                g_SortInfo[hList].column = pnmlv->iSubItem;
+                g_SortInfo[hList].ascending = true;
+            }
+            
+            int count = ListView_GetItemCount(hList);
+            for (int i = 0; i < count; i++) {
+                LVITEMW lvi = { 0 };
+                lvi.mask = LVIF_PARAM;
+                lvi.iItem = i;
+                ListView_GetItem(hList, &lvi);
+                lvi.lParam = i;
+                ListView_SetItem(hList, &lvi);
+            }
+            
+            ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+        }
+        break;
+    }
     case WM_TRAYICON: {
         if (lParam == WM_LBUTTONDBLCLK) {
             ShowWindow(hWnd, SW_RESTORE);
@@ -1030,21 +1114,55 @@ INT_PTR CALLBACK ProcessDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
     }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
-        if (nm->idFrom == IDC_LIST_PROCESS && nm->code == NM_RCLICK) {
-            LPNMLISTVIEW pnmv = (LPNMLISTVIEW)lParam;
-            POINT pt;
-            GetCursorPos(&pt);
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_REFRESH, L"刷新列表");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_MODULES, L"查看模块列表");
-            AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_KILL, L"结束进程");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_COPY_PATH, L"复制文件路径");
-            AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_OPEN_DIR, L"打开文件目录");
-            
-            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
-            DestroyMenu(hMenu);
+        if (nm->idFrom == IDC_LIST_PROCESS) {
+            if (nm->code == NM_RCLICK) {
+                LPNMLISTVIEW pnmv = (LPNMLISTVIEW)lParam;
+                POINT pt;
+                GetCursorPos(&pt);
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_REFRESH, L"刷新列表");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_MODULES, L"查看模块列表");
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_KILL, L"结束进程");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_COPY_PATH, L"复制文件路径");
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_OPEN_DIR, L"打开文件目录");
+                
+                TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
+                DestroyMenu(hMenu);
+            } else if (nm->code == LVN_COLUMNCLICK) {
+                LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+                HWND hList = pnmlv->hdr.hwndFrom;
+                
+                if (!g_SortInfo.count(hList)) {
+                    g_SortInfo[hList] = { 0, true, hList };
+                }
+                
+                // 如果点击同一列，切换排序方向
+                if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                    g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+                } else {
+                    g_SortInfo[hList].column = pnmlv->iSubItem;
+                    g_SortInfo[hList].ascending = true;
+                }
+                
+                // 更新lParam为当前行索引（用于排序）
+                int count = ListView_GetItemCount(hList);
+                for (int i = 0; i < count; i++) {
+                    LVITEMW lvi = { 0 };
+                    lvi.mask = LVIF_PARAM;
+                    lvi.iItem = i;
+                    ListView_GetItem(hList, &lvi);
+                    // 只在首次排序时设置lParam为行索引
+                    if (g_SortInfo[hList].column == pnmlv->iSubItem && g_SortInfo[hList].ascending) {
+                        // 首次点击该列时保存原始lParam（如果需要的话）
+                    }
+                    lvi.lParam = i; // 设置为当前行索引用于排序
+                    ListView_SetItem(hList, &lvi);
+                }
+                
+                ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+            }
         }
         break;
     }
@@ -1502,24 +1620,52 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
     }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
-        if (nm->idFrom == IDC_LIST_WINDOW && nm->code == NM_RCLICK) {
-            POINT pt;
-            GetCursorPos(&pt);
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_REFRESH, L"刷新列表");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_CLOSE, L"关闭窗口");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_MAX, L"最大化");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_MIN, L"最小化");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_RESTORE, L"恢复窗口");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_HIDE, L"隐藏窗口");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_SHOW, L"显示窗口");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_COPY_TITLE, L"复制标题");
-            AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_COPY_HWND, L"复制句柄");
+        if (nm->idFrom == IDC_LIST_WINDOW) {
+            if (nm->code == NM_RCLICK) {
+                POINT pt;
+                GetCursorPos(&pt);
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_REFRESH, L"刷新列表");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_CLOSE, L"关闭窗口");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_MAX, L"最大化");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_MIN, L"最小化");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_RESTORE, L"恢复窗口");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_HIDE, L"隐藏窗口");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_SHOW, L"显示窗口");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_COPY_TITLE, L"复制标题");
+                AppendMenuW(hMenu, MF_STRING, IDM_WINDOW_COPY_HWND, L"复制句柄");
 
-            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
-            DestroyMenu(hMenu);
+                TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
+                DestroyMenu(hMenu);
+            } else if (nm->code == LVN_COLUMNCLICK) {
+                LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+                HWND hList = pnmlv->hdr.hwndFrom;
+                
+                if (!g_SortInfo.count(hList)) {
+                    g_SortInfo[hList] = { 0, true, hList };
+                }
+                
+                if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                    g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+                } else {
+                    g_SortInfo[hList].column = pnmlv->iSubItem;
+                    g_SortInfo[hList].ascending = true;
+                }
+                
+                int count = ListView_GetItemCount(hList);
+                for (int i = 0; i < count; i++) {
+                    LVITEMW lvi = { 0 };
+                    lvi.mask = LVIF_PARAM;
+                    lvi.iItem = i;
+                    ListView_GetItem(hList, &lvi);
+                    lvi.lParam = i;
+                    ListView_SetItem(hList, &lvi);
+                }
+                
+                ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+            }
         }
         break;
     }
@@ -1667,17 +1813,45 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
     }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
-        if (nm->idFrom == IDC_LIST_SERVICE && nm->code == NM_RCLICK) {
-            POINT pt;
-            GetCursorPos(&pt);
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_REFRESH, L"刷新列表");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_START, L"启动服务");
-            AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_STOP, L"停止服务");
-            AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_DELETE, L"删除服务");
-            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
-            DestroyMenu(hMenu);
+        if (nm->idFrom == IDC_LIST_SERVICE) {
+            if (nm->code == NM_RCLICK) {
+                POINT pt;
+                GetCursorPos(&pt);
+                HMENU hMenu = CreatePopupMenu();
+                AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_REFRESH, L"刷新列表");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_START, L"启动服务");
+                AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_STOP, L"停止服务");
+                AppendMenuW(hMenu, MF_STRING, IDC_BTN_SERVICE_DELETE, L"删除服务");
+                TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
+                DestroyMenu(hMenu);
+            } else if (nm->code == LVN_COLUMNCLICK) {
+                LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+                HWND hList = pnmlv->hdr.hwndFrom;
+                
+                if (!g_SortInfo.count(hList)) {
+                    g_SortInfo[hList] = { 0, true, hList };
+                }
+                
+                if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                    g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+                } else {
+                    g_SortInfo[hList].column = pnmlv->iSubItem;
+                    g_SortInfo[hList].ascending = true;
+                }
+                
+                int count = ListView_GetItemCount(hList);
+                for (int i = 0; i < count; i++) {
+                    LVITEMW lvi = { 0 };
+                    lvi.mask = LVIF_PARAM;
+                    lvi.iItem = i;
+                    ListView_GetItem(hList, &lvi);
+                    lvi.lParam = i;
+                    ListView_SetItem(hList, &lvi);
+                }
+                
+                ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+            }
         }
         break;
     }
@@ -2603,6 +2777,32 @@ INT_PTR CALLBACK FileDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
             }
             TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
             DestroyMenu(hMenu);
+        } else if (nm->code == LVN_COLUMNCLICK) {
+            LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+            HWND hList = pnmlv->hdr.hwndFrom;
+            
+            if (!g_SortInfo.count(hList)) {
+                g_SortInfo[hList] = { 0, true, hList };
+            }
+            
+            if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+            } else {
+                g_SortInfo[hList].column = pnmlv->iSubItem;
+                g_SortInfo[hList].ascending = true;
+            }
+            
+            int count = ListView_GetItemCount(hList);
+            for (int i = 0; i < count; i++) {
+                LVITEMW lvi = { 0 };
+                lvi.mask = LVIF_PARAM;
+                lvi.iItem = i;
+                ListView_GetItem(hList, &lvi);
+                lvi.lParam = i;
+                ListView_SetItem(hList, &lvi);
+            }
+            
+            ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
         } else if (nm->code == NM_DBLCLK) {
             if (nm->idFrom == IDC_LIST_FILE_REMOTE) {
                 int index = ((LPNMITEMACTIVATE)lParam)->iItem;
@@ -2921,8 +3121,18 @@ INT_PTR CALLBACK FileDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
             DWORD style = GetWindowLong(hTarget, GWL_STYLE);
             if ((style & LVS_TYPEMASK) == LVS_REPORT) {
                 SetWindowLong(hTarget, GWL_STYLE, (style & ~LVS_TYPEMASK) | LVS_ICON);
+                // 重新设置图像列表以确保图标正确显示
+                if (dlgToImageList.count(hDlg)) {
+                    ListView_SetImageList(hTarget, dlgToImageList[hDlg], LVSIL_NORMAL);
+                    ListView_SetImageList(hTarget, dlgToImageList[hDlg], LVSIL_SMALL);
+                }
             } else {
                 SetWindowLong(hTarget, GWL_STYLE, (style & ~LVS_TYPEMASK) | LVS_REPORT);
+                // 重新设置图像列表以确保图标正确显示
+                if (dlgToImageList.count(hDlg)) {
+                    ListView_SetImageList(hTarget, dlgToImageList[hDlg], LVSIL_NORMAL);
+                    ListView_SetImageList(hTarget, dlgToImageList[hDlg], LVSIL_SMALL);
+                }
             }
             InvalidateRect(hTarget, NULL, TRUE);
         } else if (LOWORD(wParam) == IDC_BTN_FILE_DELETE) {
