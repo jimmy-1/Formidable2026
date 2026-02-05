@@ -71,42 +71,30 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
     char buffer[4096];
     DWORD bytesRead;
     bool headerSent = false;
-    bool skipFirstOutput = true; // 跳过 chcp 命令的输出
+    int outputCount = 0; // 计数输出次数
     
     while (bRunning) {
         if (ReadFile(hReadPipeOut, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
             buffer[bytesRead] = '\0';
             
-            // 跳过 chcp 65001 的输出（Active code page: 65001）
-            if (skipFirstOutput) {
-                std::string output(buffer, bytesRead);
-                if (output.find("65001") != std::string::npos || 
-                    output.find("Active code page") != std::string::npos) {
-                    skipFirstOutput = false;
-                    
-                    // 在跳过 chcp 输出后发送欢迎消息
-                    std::string startMsg = "--------------------------------------------------\r\n";
-                    startMsg += "[System] 远程终端已启动...\r\n";
-                    startMsg += "[System] 当前权限: ";
-                    startMsg += IsAdminLocal() ? "管理员 (Administrator)\r\n" : "普通用户 (User)\r\n";
+            // 前两次输出包含chcp切换信息，跳过
+            outputCount++;
+            if (outputCount <= 2) {
+                if (!headerSent) {
+                    // 在跳过初始输出后发送欢迎消息
+                    std::string startMsg = "Interactive Terminal Opened\r\n";
+                    startMsg += "--------------------------------------------------\r\n";
+                    startMsg += "[System] Remote terminal started...\r\n";
+                    startMsg += "[System] Current privileges: ";
+                    startMsg += IsAdminLocal() ? "Administrator\r\n" : "User\r\n";
                     startMsg += "--------------------------------------------------\r\n\r\n";
                     SendResponse(g_socket, CMD_TERMINAL_DATA, startMsg.c_str(), (int)startMsg.size());
                     headerSent = true;
-                    continue;
                 }
+                continue; // 跳过chcp输出
             }
             
-            // 确保在发送第一个实际输出前已发送欢迎消息
-            if (!headerSent) {
-                std::string startMsg = "--------------------------------------------------\r\n";
-                startMsg += "[System] 远程终端已启动...\r\n";
-                startMsg += "[System] 当前权限: ";
-                startMsg += IsAdminLocal() ? "管理员 (Administrator)\r\n" : "普通用户 (User)\r\n";
-                startMsg += "--------------------------------------------------\r\n\r\n";
-                SendResponse(g_socket, CMD_TERMINAL_DATA, startMsg.c_str(), (int)startMsg.size());
-                headerSent = true;
-            }
-            
+            // 发送实际的终端输出
             SendResponse(g_socket, CMD_TERMINAL_DATA, buffer, (int)bytesRead);
         } else {
             DWORD dwErr = GetLastError();

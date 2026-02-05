@@ -1,4 +1,4 @@
-# Formidable 2026
+﻿# Formidable 2026
 
 Formidable 2026 是一款基于 C++/C/Python 开发的高性能、模块化远程管理平台。
 

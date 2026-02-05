@@ -10,6 +10,7 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <vector>
+#include <map>
 #include "../../Common/Config.h"
 #include "../../Common/Utils.h"
 #include <sddl.h>
@@ -22,6 +23,14 @@
 #endif
 
 using namespace Formidable;
+
+// 用于计算 CPU 占用率的结构
+struct CpuTimeInfo {
+    FILETIME lastKernel;
+    FILETIME lastUser;
+    ULONGLONG lastTime;
+};
+static std::map<uint32_t, CpuTimeInfo> s_cpuHistory;
 
 // 从 Formidable-Professional-Edition 移植的安全代码
 // Check if the process is 64bit.
@@ -135,8 +144,47 @@ void ListProcesses(SOCKET s) {
             std::string utf8Name = WideToUTF8(pe32.szExeFile);
             strncpy(info.name, utf8Name.c_str(), sizeof(info.name) - 1);
             
-            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe32.th32ProcessID);
+            HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pe32.th32ProcessID);
             if (hProcess) {
+                // 获取内存信息
+                PROCESS_MEMORY_COUNTERS_EX pmc;
+                if (GetProcessMemoryInfo(hProcess, (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+                    info.workingSet = pmc.WorkingSetSize;
+                }
+
+                // 计算 CPU 占用率 (估算值)
+                FILETIME ftCreate, ftExit, ftKernel, ftUser;
+                SYSTEMTIME stNow;
+                GetSystemTime(&stNow);
+                FILETIME ftNow;
+                SystemTimeToFileTime(&stNow, &ftNow);
+                ULONGLONG qwNow = ((ULONGLONG)ftNow.dwHighDateTime << 32) | ftNow.dwLowDateTime;
+
+                if (GetProcessTimes(hProcess, &ftCreate, &ftExit, &ftKernel, &ftUser)) {
+                    if (s_cpuHistory.count(pe32.th32ProcessID)) {
+                        auto& history = s_cpuHistory[pe32.th32ProcessID];
+                        ULONGLONG qwLastKernel = ((ULONGLONG)history.lastKernel.dwHighDateTime << 32) | history.lastKernel.dwLowDateTime;
+                        ULONGLONG qwLastUser = ((ULONGLONG)history.lastUser.dwHighDateTime << 32) | history.lastUser.dwLowDateTime;
+                        ULONGLONG qwKernel = ((ULONGLONG)ftKernel.dwHighDateTime << 32) | ftKernel.dwLowDateTime;
+                        ULONGLONG qwUser = ((ULONGLONG)ftUser.dwHighDateTime << 32) | ftUser.dwLowDateTime;
+
+                        ULONGLONG totalDelta = (qwKernel - qwLastKernel) + (qwUser - qwLastUser);
+                        ULONGLONG timeDelta = qwNow - history.lastTime;
+                        
+                        if (timeDelta > 0) {
+                            // 简单的近似计算
+                            info.cpuUsage = (float)((totalDelta * 100.0) / timeDelta);
+                            if (info.cpuUsage > 100.0f) info.cpuUsage = 100.0f;
+                        }
+                    }
+                    
+                    // 更新历史
+                    CpuTimeInfo& history = s_cpuHistory[pe32.th32ProcessID];
+                    history.lastKernel = ftKernel;
+                    history.lastUser = ftUser;
+                    history.lastTime = qwNow;
+                }
+
                 DWORD dwSize = MAX_PATH;
                 wchar_t szPath[MAX_PATH] = { 0 };
                 if (QueryFullProcessImageNameW(hProcess, 0, szPath, &dwSize)) {

