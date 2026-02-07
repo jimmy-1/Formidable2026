@@ -22,7 +22,7 @@ public:
     /// <summary>
     /// 显示文件管理对话框
     /// </summary>
-    static void Show(HWND hParent, uint32_t clientId);
+    static HWND Show(HWND hParent, uint32_t clientId);
 };
 
 } // namespace UI

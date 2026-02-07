@@ -51,8 +51,47 @@ Formidable 2026 是一款基于 C++/C/Python 开发的高性能、模块化远�
 1. 使用 Visual Studio 打开 `Formidable2026.sln`。
 2. 确保已安装 C++ 桌面开发组件。
 3. 选择对应的配置（Debug/Release）和平台（x86/x64）。
-4. 先编译 `Modules` 目录下的所有 DLL 工程，然后编译 `Client`，最后编译 `Master`。
-5. 生成的可执行文件位于各工程的 `Intermediate` 目录下或解决方案根目录的输出路径。
+4. 按照以下顺序编译：
+   - **Common** (公共库)
+   - **Modules** (所有功能模块 DLL)
+   - **Client** (被控端)
+   - **Master** (主控端)
+5. 生成的可执行文件位于各工程的输出目录（`x86\Release\` 或 `x64\Release\`）。
+
+**详细的编译和调试指南请参考**: [DEVELOPMENT.md](DEVELOPMENT.md)
+
+## 技术文档
+
+### 架构文档
+详细的项目架构、通信协议、模块系统和数据流说明：
+
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - 系统架构文档
+  - 三层架构设计（主控端/被控端/功能模块）
+  - 通信协议详解（PkgHeader + CommandPkg）
+  - 模块加载流程图
+  - 数据流向说明
+  - 安全机制
+
+### 开发指南
+完整的开发流程、代码规范和调试技巧：
+
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - 开发指南
+  - 开发环境设置
+  - 项目编译详细步骤
+  - 调试技巧和工具
+  - 代码规范和命名约定
+  - 测试指南
+  - 常见问题解答
+  - 如何添加新功能模块
+
+### 快速链接
+
+| 文档 | 用途 | 适用人群 |
+|------|------|---------|
+| README.md | 项目概览和快速上手 | 所有用户 |
+| ARCHITECTURE.md | 深入理解系统架构 | 架构师、开发者 |
+| DEVELOPMENT.md | 开发和调试指南 | 开发者、贡献者 |
+| REFACTORING.md | 重构历史记录 | 维护者 |
 
 ## 免责声明
 

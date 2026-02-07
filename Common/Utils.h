@@ -25,6 +25,10 @@ namespace Formidable {
     std::string GetLocalIP();
     std::string GetLocationByIP(const std::string& ip);
     
+    // 线程管理
+    void SetThreadName(HANDLE hThread, const std::wstring& name);
+    void SetThreadName(const std::wstring& name); // 设置当前线程名
+
     // 权限管理
     bool EnableDebugPrivilege();
     bool IsAdmin();

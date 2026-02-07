@@ -201,17 +201,14 @@ namespace Formidable {
                         if (pos != std::string::npos) {
                             pos += key.length() + 4;
                             size_t end = response.find("\"", pos);
-                            if (end != std::string::npos) {
-                                return response.substr(pos, end - pos);
-                            }
+                            if (end != std::string::npos) return response.substr(pos, end - pos);
                         }
                         return std::string("");
                     };
-
-                    if (get_val("status") == "success") {
-                        std::string country = get_val("country");
-                        std::string region = get_val("regionName");
-                        std::string city = get_val("city");
+                    std::string country = get_val("country");
+                    std::string region = get_val("regionName");
+                    std::string city = get_val("city");
+                    if (!country.empty()) {
                         location = country;
                         if (!region.empty()) location += " " + region;
                         if (!city.empty()) location += " " + city;
@@ -223,6 +220,54 @@ namespace Formidable {
         }
         return location;
     }
+
+    typedef HRESULT(WINAPI* SetThreadDescriptionPtr)(HANDLE, PCWSTR);
+
+    // 异常方式辅助函数，避免 C2712 错误 (SEH 与 C++ 析构对象冲突)
+    static void SetThreadNameExceptionHelper(DWORD dwThreadID, const char* szName) {
+        const DWORD MS_VC_EXCEPTION = 0x406D1388;
+#pragma pack(push, 8)
+        typedef struct tagTHREADNAME_INFO {
+            DWORD dwType;     // Must be 0x1000.
+            LPCSTR szName;    // Pointer to name (in user addr space).
+            DWORD dwThreadID; // Thread ID (-1=caller thread).
+            DWORD dwFlags;    // Reserved for future use, must be zero.
+        } THREADNAME_INFO;
+#pragma pack(pop)
+
+        THREADNAME_INFO info;
+        info.dwType = 0x1000;
+        info.szName = szName;
+        info.dwThreadID = dwThreadID;
+        info.dwFlags = 0;
+
+        __try {
+            RaiseException(MS_VC_EXCEPTION, 0, sizeof(info) / sizeof(ULONG_PTR), (ULONG_PTR*)&info);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+    }
+
+    void SetThreadName(HANDLE hThread, const std::wstring& name) {
+        // 1. 尝试使用现代 API (Windows 10 1607+)
+        HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
+        if (hKernel32) {
+            SetThreadDescriptionPtr pSetThreadDescription = (SetThreadDescriptionPtr)GetProcAddress(hKernel32, "SetThreadDescription");
+            if (pSetThreadDescription) {
+                pSetThreadDescription(hThread, name.c_str());
+                return;
+            }
+        }
+
+        // 2. 尝试使用异常方式 (旧版本 Windows，主要用于调试器)
+        std::string nameAnsi = WideToUTF8(name);
+        SetThreadNameExceptionHelper(GetThreadId(hThread), nameAnsi.c_str());
+    }
+
+    void SetThreadName(const std::wstring& name) {
+        SetThreadName(GetCurrentThread(), name);
+    }
+
     bool EnableDebugPrivilege() {
         HANDLE hToken;
         if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) return false;
@@ -278,7 +323,7 @@ namespace Formidable {
     }
 
     bool SelfElevate() {
-        if (IsAdmin()) return true;
+        if (IsAdmin()) return false;
 
         wchar_t szPath[MAX_PATH];
         if (GetModuleFileNameW(NULL, szPath, MAX_PATH)) {
@@ -288,10 +333,10 @@ namespace Formidable {
             sei.hwnd = NULL;
             sei.nShow = SW_SHOWNORMAL;
             if (ShellExecuteExW(&sei)) {
-                return false; // 启动了新进程，当前进程应该退出
+                return true; // 启动了新进程，当前进程应该退出
             }
         }
-        return false;
+        return false; // 提权失败
     }
 
     std::string ActivityMonitor::GetStatus() {

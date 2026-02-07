@@ -40,24 +40,26 @@
 #define IDC_EDIT_INSTALL_NAME   322
 #define IDC_EDIT_SERVICE_NAME   323
 #define IDC_EDIT_DOWNLOAD_URL   324
-#define IDC_CHECK_RUN_AS_ADMIN  325
 #define IDC_CHECK_ENCRYPT_IP    326
 #define IDC_CHECK_HIDE_FILE     327
-#define IDC_SLIDER_CLIENT_SIZE  327
-#define IDC_STATIC_PAYLOAD      328
-#define IDC_STATIC_DOWNLOAD     329
+#define IDC_SLIDER_CLIENT_SIZE  340
+#define IDC_STATIC_PAYLOAD      341
+#define IDC_STATIC_DOWNLOAD     342
+
 // 生成器附加控件
 #define IDC_CHECK_ADMIN         335
 #define IDC_CHECK_STARTUP       336
 #define IDC_RADIO_X86           337
 #define IDC_RADIO_X64           338
 #define IDC_CHECK_BOTH          339
+
 // 生成器菜单
 #define IDR_MENU_BUILD          330
 #define ID_MENU_ENCRYPT_IP      331
 #define ID_RANDOM_NAME          332
 #define ID_CLIENT_RUNAS_ADMIN   333
 #define ID_HELP_FINDDEN         334
+
 // 进程管理对话框
 #define IDD_PROCESS     401
 #define IDC_LIST_PROCESS 402
@@ -70,12 +72,14 @@
 #define IDM_PROCESS_MODULES  409
 #define IDD_MODULES          410
 #define IDC_LIST_MODULES     411
+
 // 终端管理对话框
 #define IDD_TERMINAL    501
 #define IDC_EDIT_TERM_OUT 502
 #define IDC_EDIT_TERM_IN  503
 #define IDC_BTN_TERM_SEND 504
 #define IDC_LIST_COMMON_CMDS 505
+
 // 窗口管理对话框
 #define IDD_WINDOW      1101
 #define IDC_LIST_WINDOW 1102
@@ -103,11 +107,13 @@
 #define IDC_BTN_SERVICE_START   1204
 #define IDC_BTN_SERVICE_STOP    1205
 #define IDC_BTN_SERVICE_DELETE  1206
+
 // 远程桌面对话框
 #define IDD_DESKTOP     1401
 #define IDC_STATIC_SCREEN 1402
 #define IDC_BTN_DESKTOP_START 1403
 #define IDC_BTN_DESKTOP_STOP  1404
+
 // 远程桌面右键功能
 #define IDM_DESKTOP_MOVE        1410
 #define IDM_DESKTOP_SIZE        1411
@@ -145,6 +151,22 @@
 #define IDM_KEYLOG_SAVE_FILE    1442
 #define IDM_KEYLOG_CLEAR_WINDOW 1443
 #define IDM_KEYLOG_TOGGLE_OFFLINE 1444
+
+// 主菜单和工具栏 ID (1700 范围)
+#define IDM_TERMINAL     1701
+#define IDM_PROCESS      1702
+#define IDM_WINDOW       1703
+#define IDM_DESKTOP      1704
+#define IDM_FILE         1705
+#define IDM_AUDIO        1706
+#define IDM_VIDEO        1707
+#define IDM_SERVICE      1708
+#define IDM_REGISTRY     1709
+#define IDM_KEYLOGGER    1710
+#define IDM_SETTINGS     1711
+#define IDM_BUILDER      1712
+#define IDM_HELP         1713
+
 // 客户端列表右键菜单
 #define IDM_CLIENT_REMARK       1500
 #define IDM_CLIENT_GROUP        1501
@@ -166,6 +188,7 @@
 #define IDM_CLIENT_PROXY_MAP    1528
 #define IDM_GROUP_RENAME        1529
 #define IDM_GROUP_DELETE        1530
+
 // 主菜单项
 #define IDM_MENU_SET            1601
 #define IDM_TOOL_INPUT_PASSWORD 1602
@@ -180,14 +203,17 @@
 #define IDM_EXTEND_HISTORY      1611
 #define IDM_EXTEND_BACKUP       1612
 #define IDM_EXTEND_IMPORT       1613
+
 // 通用输入对话框
 #define IDD_INPUT               1509
 #define IDC_STATIC_PROMPT       1510
 #define IDC_EDIT_INPUT          1511
+
 // 注册表管理对话框
 #define IDD_REGISTRY    1301
 #define IDC_TREE_REGISTRY 1302
 #define IDC_LIST_REGISTRY_VALUES 1303
+
 // 注册表右键菜单
 #define IDM_REG_REFRESH         1310
 #define IDM_REG_NEW_KEY         1311
@@ -198,9 +224,10 @@
 #define IDM_REG_COPY_NAME       1316
 #define IDM_REG_COPY_PATH       1317
 #define IDM_REG_EXPORT          1318
+
 // 设置对话框
 #define IDD_SETTINGS    1900
-#define IDC_EDIT_PUBLIC_IP     1602
+#define IDC_EDIT_PUBLIC_IP     1902
 #define IDC_EDIT_LISTEN_PORT   1903
 #define IDC_EDIT_MAX_CONN      1904
 #define IDC_EDIT_UDP_COUNT     1905
@@ -213,49 +240,56 @@
 #define IDC_COMBO_SOFTWARE_CHECK 1912
 #define IDC_COMBO_MULTI_THREAD   1913
 #define IDC_COMBO_MULTI_SCREEN   1914
-#define IDC_RADIO_NO_COMPRESS    1915
-#define IDC_RADIO_YES_COMPRESS   1916
+#define IDC_COMBO_PRIORITY_GOLD  1920
+#define IDC_COMBO_MONO_GOLD      1921
+#define IDC_COMBO_COMPRESS_GOLD  1922
+#define IDC_RADIO_FRP_NO         1915
+#define IDC_RADIO_FRP_YES        1916
+#define IDC_RADIO_COMPRESS_NO    1925
+#define IDC_RADIO_COMPRESS_YES   1926
 #define IDC_BTN_SAVE_SETTINGS    1917
-#define IDD_FILE        1501
-#define IDC_LIST_FILE_REMOTE 1502
-#define IDC_LIST_FILE_LOCAL  1505
-#define IDC_EDIT_FILE_PATH_REMOTE 1503
-#define IDC_EDIT_FILE_PATH_LOCAL 1506
-#define IDC_BTN_FILE_GO_REMOTE 1504
-#define IDC_BTN_FILE_GO_LOCAL 1507
-#define IDC_BTN_FILE_SEND   1508
-#define IDC_BTN_FILE_COPY   1509
-#define IDC_BTN_FILE_DELETE 1510
-#define IDC_BTN_FILE_MKDIR  1511
-#define IDC_BTN_FILE_LAYOUT 1512
+
+#define IDD_FILE        2000
+#define IDC_LIST_FILE_REMOTE 2001
+#define IDC_LIST_FILE_LOCAL  2002
+#define IDC_EDIT_FILE_PATH_REMOTE 2003
+#define IDC_EDIT_FILE_PATH_LOCAL 2004
+#define IDC_BTN_FILE_GO_REMOTE 2005
+#define IDC_BTN_FILE_GO_LOCAL 2006
+#define IDC_BTN_FILE_SEND   2007
+#define IDC_BTN_FILE_COPY   2008
+#define IDC_BTN_FILE_DELETE 2009
+#define IDC_BTN_FILE_MKDIR  2010
+#define IDC_BTN_FILE_LAYOUT 2011
 // 文件管理右键菜单
-#define IDM_FILE_REFRESH        1520
-#define IDM_FILE_UPLOAD         1521
-#define IDM_FILE_DOWNLOAD       1522
-#define IDM_FILE_DELETE         1523
-#define IDM_FILE_RENAME         1524
-#define IDM_FILE_NEW_FOLDER     1525
-#define IDM_FILE_OPEN           1526
-#define IDM_FILE_EXECUTE        1527
-#define IDM_FILE_COPY_PATH      1528
-#define IDM_FILE_PROPERTIES     1529
+#define IDM_FILE_REFRESH        2020
+#define IDM_FILE_UPLOAD         2021
+#define IDM_FILE_DOWNLOAD       2022
+#define IDM_FILE_DELETE         2023
+#define IDM_FILE_RENAME         2024
+#define IDM_FILE_NEW_FOLDER     2025
+#define IDM_FILE_OPEN           2026
+#define IDM_FILE_EXECUTE        2027
+#define IDM_FILE_COPY_PATH      2028
+#define IDM_FILE_PROPERTIES     2029
 // 文件管理视图切换
-#define IDM_FILE_VIEW_LIST      1530
-#define IDM_FILE_VIEW_ICON      1531
-#define IDM_FILE_VIEW_DETAIL    1532
-#define IDC_BTN_FILE_VIEW       1533
+#define IDM_FILE_VIEW_LIST      2030
+#define IDM_FILE_VIEW_ICON      2031
+#define IDM_FILE_VIEW_DETAIL    2032
+#define IDC_BTN_FILE_VIEW       2033
+
 // 视频管理对话框
-#define IDD_VIDEO               1601
-#define IDC_STATIC_VIDEO        1602
-#define IDC_BTN_VIDEO_START     1603
-#define IDC_BTN_VIDEO_STOP      1604
-#define IDC_BTN_VIDEO_SAVE      1605
+#define IDD_VIDEO               2100
+#define IDC_STATIC_VIDEO        2101
+#define IDC_BTN_VIDEO_START     2102
+#define IDC_BTN_VIDEO_STOP      2103
+#define IDC_BTN_VIDEO_SAVE      2104
 
 // 语音管理对话框
-#define IDD_AUDIO               1701
-#define IDC_STATIC_AUDIO        1702
-#define IDC_BTN_AUDIO_START     1703
-#define IDC_BTN_AUDIO_STOP      1704
+#define IDD_AUDIO               2200
+#define IDC_STATIC_AUDIO        2201
+#define IDC_BTN_AUDIO_START     2202
+#define IDC_BTN_AUDIO_STOP      2203
 // 键盘记录对话框
 #define IDD_KEYLOGGER   1801
 #define IDC_EDIT_KEYLOG 1802

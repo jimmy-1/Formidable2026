@@ -163,8 +163,8 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
     return (INT_PTR)FALSE;
 }
 
-void ProcessDialog::Show(HWND hParent, uint32_t clientId) {
-    CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_PROCESS), hParent, DlgProc, (LPARAM)clientId);
+HWND ProcessDialog::Show(HWND hParent, uint32_t clientId) {
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_PROCESS), hParent, DlgProc, (LPARAM)clientId);
 }
 
 } // namespace UI

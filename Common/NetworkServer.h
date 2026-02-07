@@ -1,20 +1,10 @@
 ﻿#pragma once
 
-// 防止 windows.h 包含旧的 winsock.h，必须在任何 Windows 头文件之前定义
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_
-#endif
-
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-
+#include "Config.h"
 #include "../thirdparty/Include/HPSocket/HPSocket.h"
-#include <windows.h>
 #include <functional>
 #include <map>
 #include <mutex>
-#include "Config.h"
 
 namespace Formidable {
 

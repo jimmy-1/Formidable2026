@@ -32,7 +32,8 @@ INT_PTR CALLBACK KeylogDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         }
         
         if (client) {
-            std::wstring title = L"键盘记录 - " + Formidable::Utils::StringHelper::UTF8ToWide(client->computerName);
+// 设置默认标题
+            std::wstring title = L"键盘记录 - " + Formidable::Utils::StringHelper::UTF8ToWide(client->info.computerName);
             SetWindowTextW(hDlg, title.c_str());
             
             // 先请求离线记录

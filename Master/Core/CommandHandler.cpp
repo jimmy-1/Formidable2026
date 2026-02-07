@@ -66,7 +66,8 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
     }
 
     // 其他数据都应该是 CommandPkg 格式
-    if (iLength < sizeof(Formidable::CommandPkg)) {
+    // CommandPkg的实际大小是 sizeof(CommandPkg) - 1 + 数据长度
+    if (iLength < sizeof(Formidable::CommandPkg) - 1) {
         // 数据太短，无法处理
         return;
     }
@@ -122,6 +123,12 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
         case Formidable::CMD_SCREEN_CAPTURE:
             HandleScreenCapture(clientId, pkg, iLength);
             break;
+        case Formidable::CMD_MOUSE_EVENT:
+            // 鼠标事件由客户端处理，Master端不需要响应
+            break;
+        case Formidable::CMD_KEY_EVENT:
+            // 键盘事件由客户端处理，Master端不需要响应
+            break;
         case Formidable::CMD_VOICE_STREAM:
             HandleVoiceStream(clientId, pkg, iLength);
             break;
@@ -156,20 +163,23 @@ void CommandHandler::HandleHeartbeat(uint32_t clientId, const Formidable::Comman
             std::wstring wUptime = Utils::StringHelper::UTF8ToWide(client->info.uptime);
 
             if (client->listIndex >= 0) {
-                LVITEMW lvi = { 0 };
-                lvi.iSubItem = 9; // RTT
-                lvi.pszText = (LPWSTR)wRTT.c_str();
-                SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
-                
-                lvi.iSubItem = 12; // Uptime
-                lvi.pszText = (LPWSTR)wUptime.c_str();
-                SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
-                
-                lvi.iSubItem = 13; // Active Window
-                lvi.pszText = (LPWSTR)wActWin.c_str();
-                SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
-            }
-        }
+        LVITEMW lvi = { 0 };
+        lvi.iSubItem = 9; // RTT
+        lvi.pszText = (LPWSTR)wRTT.c_str();
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
+        
+        lvi.iSubItem = 12; // Uptime
+        lvi.pszText = (LPWSTR)wUptime.c_str();
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
+        
+        lvi.iSubItem = 13; // Active Window
+        lvi.pszText = (LPWSTR)wActWin.c_str();
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
+    } else {
+        // 如果客户端已经在列表中但 listIndex 还是 -1（可能重连），重新插入或更新
+        HandleClientInfo(clientId, &client->info);
+    }
+}
     }
     client->lastHeartbeat = GetTickCount64();
 }
@@ -185,15 +195,43 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     if (!info) return;
     memcpy(&client->info, info, sizeof(Formidable::ClientInfo));
     
+    // 同步备注和分组
+    if (client->remark.empty() && info->remark[0] != L'\0') client->remark = info->remark;
+    if (client->group.empty() && info->group[0] != L'\0') client->group = info->group;
+    
     std::wstring wIP = Utils::StringHelper::UTF8ToWide(client->ip);
-    
-    LVITEMW lvi = { 0 };
-    lvi.mask = LVIF_TEXT | LVIF_PARAM;
-    lvi.pszText = (LPWSTR)wIP.c_str();
-    lvi.lParam = (LPARAM)clientId;
-    
+    int index = client->listIndex;
+
     SendMessageW(g_hListClients, WM_SETREDRAW, FALSE, 0);
-    int index = (int)SendMessageW(g_hListClients, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+    if (index < 0) {
+        LVITEMW lvi = { 0 };
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.pszText = (LPWSTR)wIP.c_str();
+        lvi.lParam = (LPARAM)clientId;
+        lvi.iItem = 0; // 插入到最前面
+
+        index = (int)SendMessageW(g_hListClients, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+        
+        // 更新其他所有在线客户端的 listIndex
+        {
+            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+            for (auto& pair : g_Clients) {
+                if (pair.second->clientId != clientId && pair.second->listIndex >= 0) {
+                    pair.second->listIndex++;
+                }
+            }
+        }
+        client->listIndex = index;
+    } else {
+        // 更新第一列（IP）
+        LVITEMW lvi = { 0 };
+        lvi.iItem = index;
+        lvi.iSubItem = 0;
+        lvi.mask = LVIF_TEXT;
+        lvi.pszText = (LPWSTR)wIP.c_str();
+        SendMessageW(g_hListClients, LVM_SETITEMW, 0, (LPARAM)&lvi);
+    }
     
     std::wstring wPort = std::to_wstring(client->port);
     std::wstring wLAN = Utils::StringHelper::UTF8ToWide(client->info.lanAddr);
@@ -251,7 +289,6 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
     SendMessageW(g_hListClients, WM_SETREDRAW, TRUE, 0);
-    client->listIndex = index;
 
     // 异步获取地理位置
     std::thread([clientId, client]() {

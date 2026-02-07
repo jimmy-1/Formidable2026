@@ -12,6 +12,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include "resource.h"
 #include "../Common/ClientTypes.h"
 #include "../Common/NetworkServer.h"
 
@@ -26,20 +27,7 @@
 #define IDC_STATUSBAR    1004
 #define IDC_GROUP_TAB    1005
 
-// 菜单/工具栏按钮ID
-#define IDM_TERMINAL     2001
-#define IDM_PROCESS      2002
-#define IDM_WINDOW       2003
-#define IDM_DESKTOP      2004
-#define IDM_FILE         2005
-#define IDM_AUDIO        2006
-#define IDM_VIDEO        2007
-#define IDM_SERVICE      2008
-#define IDM_REGISTRY     2009
-#define IDM_KEYLOGGER    2010
-#define IDM_SETTINGS     2011
-#define IDM_BUILDER      2012
-#define IDM_HELP         2013
+// 托盘菜单 ID
 #define IDM_TRAY_STARTUP 2014
 #define IDM_TRAY_RESTART 2015
 #define IDM_TRAY_EXIT    2016

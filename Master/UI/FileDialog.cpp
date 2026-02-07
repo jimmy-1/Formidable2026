@@ -6,6 +6,7 @@
 #endif
 // FileDialog.cpp - 文件管理对话框实现
 #include "FileDialog.h"
+#include "FileManagerUI.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
 #include "../../Common/ClientTypes.h"
@@ -158,6 +159,25 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         lvc.pszText = (LPWSTR)L"修改时间"; lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
 
         SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, L"C:\\");
+        SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_LOCAL, L"C:\\");
+        
+        // 初始化本地文件列表列
+        HWND hListLocal = GetDlgItem(hDlg, IDC_LIST_FILE_LOCAL);
+        ListView_SetExtendedListViewStyle(hListLocal, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        // 使用与远程相同的图标列表(如果有)
+        if (s_hFileImageList) {
+            ListView_SetImageList(hListLocal, s_hFileImageList, LVSIL_SMALL);
+            ListView_SetImageList(hListLocal, s_hFileImageList, LVSIL_NORMAL);
+        }
+        
+        LVCOLUMNW lvcLocal = { 0 };
+        lvcLocal.mask = LVCF_TEXT | LVCF_WIDTH;
+        lvcLocal.pszText = (LPWSTR)L"文件名"; lvcLocal.cx = 250; SendMessageW(hListLocal, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvcLocal);
+        lvcLocal.pszText = (LPWSTR)L"大小";   lvcLocal.cx = 100; SendMessageW(hListLocal, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvcLocal);
+        lvcLocal.pszText = (LPWSTR)L"修改时间"; lvcLocal.cx = 150; SendMessageW(hListLocal, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvcLocal);
+        
+        // 刷新本地列表
+        FileManagerUI::RefreshLocalFileList(hDlg, L"C:\\");
         
         Formidable::CommandPkg pkg = { 0 };
         pkg.cmd = Formidable::CMD_FILE_LIST;
@@ -284,11 +304,27 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             s_dlgViewMode[hDlg] = 2;
             SetListViewMode(hList, 2);
             break;
+        case IDC_BTN_FILE_GO_LOCAL: {
+            wchar_t szPath[MAX_PATH] = { 0 };
+            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_LOCAL, szPath, MAX_PATH);
+            FileManagerUI::RefreshLocalFileList(hDlg, szPath);
+            break;
+        }
+        case IDC_BTN_FILE_GO_REMOTE: {
+            wchar_t szPath[MAX_PATH] = { 0 };
+            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
+            std::string path = WideToUTF8(szPath);
+            if (path.empty()) path = "C:\\";
+            // 发送刷新命令
+            SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)path.size(), 0, path.c_str(), path.size());
+            break;
+        }
         case IDM_FILE_REFRESH: {
             wchar_t szPath[MAX_PATH] = { 0 };
             GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-            // 发送刷新命令...
-            // TODO: 实现刷新逻辑
+            std::string path = WideToUTF8(szPath);
+            if (path.empty()) path = "C:\\";
+            SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)path.size(), 0, path.c_str(), path.size());
             break;
         }
         case IDM_FILE_UPLOAD: {
@@ -430,8 +466,8 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
     return (INT_PTR)FALSE;
 }
 
-void FileDialog::Show(HWND hParent, uint32_t clientId) {
-    CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_FILE), hParent, DlgProc, (LPARAM)clientId);
+HWND FileDialog::Show(HWND hParent, uint32_t clientId) {
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_FILE), hParent, DlgProc, (LPARAM)clientId);
 }
 
 } // namespace UI

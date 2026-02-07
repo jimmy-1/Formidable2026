@@ -112,7 +112,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             client->hDesktopDlg = hDlg;
             
             // 设置默认标题
-            std::wstring title = L"远程桌面 - " + Formidable::Utils::StringHelper::UTF8ToWide(client->computerName);
+            std::wstring title = L"远程桌面 - " + Formidable::Utils::StringHelper::UTF8ToWide(client->info.computerName);
             SetWindowTextW(hDlg, title.c_str());
             
             Formidable::CommandPkg pkg = { 0 };
@@ -367,8 +367,8 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
     return (INT_PTR)FALSE;
 }
 
-void DesktopDialog::Show(HWND hParent, uint32_t clientId) {
-    CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_DESKTOP), hParent, DlgProc, (LPARAM)clientId);
+HWND DesktopDialog::Show(HWND hParent, uint32_t clientId) {
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_DESKTOP), hParent, DlgProc, (LPARAM)clientId);
 }
 
 } // namespace UI

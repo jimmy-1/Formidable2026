@@ -148,6 +148,9 @@ namespace Formidable {
         uint32_t msg;
         uint32_t vk;
     };
+#pragma pack(pop)
+
+#pragma pack(push, 1)
     struct CONNECT_ADDRESS {
         char        szFlag[32];      // 标识
         char        szServerIP[100]; // 主控IP

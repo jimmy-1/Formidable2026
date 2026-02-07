@@ -18,8 +18,8 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         SetDlgItemInt(hDlg, IDC_EDIT_FRP_FORWARD, g_Settings.frpRemotePort, FALSE);
         SetDlgItemInt(hDlg, IDC_EDIT_DOWNLOAD_PORT, g_Settings.frpDownloadPort, FALSE);
         SetDlgItemTextW(hDlg, IDC_EDIT_TOKEN, g_Settings.szFrpToken);
-        CheckRadioButton(hDlg, IDC_RADIO_NO_COMPRESS, IDC_RADIO_YES_COMPRESS, 
-                         g_Settings.bEnableFrp ? IDC_RADIO_YES_COMPRESS : IDC_RADIO_NO_COMPRESS);
+        CheckRadioButton(hDlg, IDC_RADIO_FRP_NO, IDC_RADIO_FRP_YES, 
+                         g_Settings.bEnableFrp ? IDC_RADIO_FRP_YES : IDC_RADIO_FRP_NO);
 
         return (INT_PTR)TRUE;
     }
@@ -34,7 +34,7 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             g_Settings.frpRemotePort = GetDlgItemInt(hDlg, IDC_EDIT_FRP_FORWARD, NULL, FALSE);
             g_Settings.frpDownloadPort = GetDlgItemInt(hDlg, IDC_EDIT_DOWNLOAD_PORT, NULL, FALSE);
             GetDlgItemTextW(hDlg, IDC_EDIT_TOKEN, g_Settings.szFrpToken, 64);
-            g_Settings.bEnableFrp = IsDlgButtonChecked(hDlg, IDC_RADIO_YES_COMPRESS) == BST_CHECKED;
+            g_Settings.bEnableFrp = IsDlgButtonChecked(hDlg, IDC_RADIO_FRP_YES) == BST_CHECKED;
 
             SaveSettings();
             MessageBoxW(hDlg, L"设置已保存", L"提示", MB_OK | MB_ICONINFORMATION);

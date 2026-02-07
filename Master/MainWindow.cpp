@@ -152,24 +152,36 @@ void LoadListData(const std::string& group) {
             lvi.pszText = (LPWSTR)wip.c_str();
             int index = ListView_InsertItem(g_hListClients, &lvi);
             
+            client->listIndex = index; // 更新 listIndex
+
             // 设置其他列数据
-            wchar_t szPort[16];
-            wsprintfW(szPort, L"%d", client->port);
-            ListView_SetItemText(g_hListClients, index, 1, szPort);
-            ListView_SetItemText(g_hListClients, index, 2, (LPWSTR)UTF8ToWide(client->clientIp).c_str());
-            ListView_SetItemText(g_hListClients, index, 3, (LPWSTR)UTF8ToWide(client->computerName).c_str());
+            std::wstring wPort = std::to_wstring(client->port);
+            std::wstring wLAN = Utils::StringHelper::UTF8ToWide(client->info.lanAddr);
+            std::wstring wComp = Utils::StringHelper::UTF8ToWide(client->info.computerName);
+            std::wstring wUserGroup = Utils::StringHelper::UTF8ToWide(client->info.userName) + L"/" + client->info.group;
+            std::wstring wOS = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
+            std::wstring wCPU = Utils::StringHelper::UTF8ToWide(client->info.cpuInfo);
+            std::wstring wRTT = std::to_wstring(client->info.rtt) + L"ms";
+            std::wstring wVer = Utils::StringHelper::UTF8ToWide(client->info.version);
+            std::wstring wInst = Utils::StringHelper::UTF8ToWide(client->info.installTime);
+            std::wstring wUptime = Utils::StringHelper::UTF8ToWide(client->info.uptime);
+            std::wstring wActWin = Utils::StringHelper::UTF8ToWide(client->info.activeWindow);
+
+            ListView_SetItemText(g_hListClients, index, 1, (LPWSTR)wPort.c_str());
+            ListView_SetItemText(g_hListClients, index, 2, (LPWSTR)L"正在获取..."); // 地理位置由异步更新
+            ListView_SetItemText(g_hListClients, index, 3, (LPWSTR)wLAN.c_str());
+            ListView_SetItemText(g_hListClients, index, 4, (LPWSTR)wComp.c_str());
+            ListView_SetItemText(g_hListClients, index, 5, (LPWSTR)wUserGroup.c_str());
+            ListView_SetItemText(g_hListClients, index, 6, (LPWSTR)wOS.c_str());
+            ListView_SetItemText(g_hListClients, index, 7, (LPWSTR)wCPU.c_str());
+            ListView_SetItemText(g_hListClients, index, 8, (LPWSTR)L"Unknown");
+            ListView_SetItemText(g_hListClients, index, 9, (LPWSTR)wRTT.c_str());
+            ListView_SetItemText(g_hListClients, index, 10, (LPWSTR)wVer.c_str());
+            ListView_SetItemText(g_hListClients, index, 11, (LPWSTR)wInst.c_str());
+            ListView_SetItemText(g_hListClients, index, 12, (LPWSTR)wUptime.c_str());
+            ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)wActWin.c_str());
+            ListView_SetItemText(g_hListClients, index, 14, (LPWSTR)client->remark.c_str());
             
-            std::wstring userGroup = UTF8ToWide(client->userName) + L"/" + client->group;
-            ListView_SetItemText(g_hListClients, index, 4, (LPWSTR)userGroup.c_str());
-            
-            ListView_SetItemText(g_hListClients, index, 5, (LPWSTR)UTF8ToWide(client->osVersion).c_str());
-            ListView_SetItemText(g_hListClients, index, 6, (LPWSTR)UTF8ToWide(client->cpuName).c_str());
-            
-            wchar_t szRam[32];
-            wsprintfW(szRam, L"%u MB", client->ram);
-            ListView_SetItemText(g_hListClients, index, 7, szRam);
-            
-            ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)client->remark.c_str());
             iCount++;
         }
     }
@@ -386,9 +398,8 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hTerminalDlg, SW_SHOW);
                     SetForegroundWindow(client->hTerminalDlg);
                 } else {
-                    UI::TerminalDialog::Show(hWnd, clientId);
-                    client->hTerminalDlg = FindWindowW(NULL, NULL);
-                    ShowWindow(client->hTerminalDlg, SW_SHOW);
+                    client->hTerminalDlg = UI::TerminalDialog::Show(hWnd, clientId);
+                    if (client->hTerminalDlg) ShowWindow(client->hTerminalDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开终端...");
                     SendModuleToClient(clientId, CMD_TERMINAL_OPEN, L"Terminal.dll");
@@ -408,8 +419,7 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hProcessDlg, SW_SHOW);
                     SetForegroundWindow(client->hProcessDlg);
                 } else {
-                    UI::ProcessDialog::Show(hWnd, clientId);
-                    client->hProcessDlg = FindWindowW(NULL, L"进程管理");
+                    client->hProcessDlg = UI::ProcessDialog::Show(hWnd, clientId);
                     if (client->hProcessDlg) ShowWindow(client->hProcessDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开进程管理...");
@@ -454,9 +464,8 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hFileDlg, SW_SHOW);
                     SetForegroundWindow(client->hFileDlg);
                 } else {
-                    UI::FileDialog::Show(hWnd, clientId);
-                    client->hFileDlg = FindWindowW(NULL, NULL);
-                    ShowWindow(client->hFileDlg, SW_SHOW);
+                    client->hFileDlg = UI::FileDialog::Show(hWnd, clientId);
+                    if (client->hFileDlg) ShowWindow(client->hFileDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开文件管理...");
                     SendModuleToClient(clientId, CMD_LOAD_MODULE, L"FileManager.dll", CMD_FILE_LIST);
@@ -476,9 +485,8 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hDesktopDlg, SW_SHOW);
                     SetForegroundWindow(client->hDesktopDlg);
                 } else {
-                    UI::DesktopDialog::Show(hWnd, clientId);
-                    client->hDesktopDlg = FindWindowW(NULL, NULL);
-                    ShowWindow(client->hDesktopDlg, SW_SHOW);
+                    client->hDesktopDlg = UI::DesktopDialog::Show(hWnd, clientId);
+                    if (client->hDesktopDlg) ShowWindow(client->hDesktopDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开远程桌面...");
                     SendModuleToClient(clientId, CMD_LOAD_MODULE, L"Multimedia.dll");
@@ -534,9 +542,8 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hRegistryDlg, SW_SHOW);
                     SetForegroundWindow(client->hRegistryDlg);
                 } else {
-                    UI::RegistryDialog::Show(hWnd, clientId);
-                    client->hRegistryDlg = FindWindowW(NULL, NULL);
-                    ShowWindow(client->hRegistryDlg, SW_SHOW);
+                    client->hRegistryDlg = UI::RegistryDialog::Show(hWnd, clientId);
+                    if (client->hRegistryDlg) ShowWindow(client->hRegistryDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开注册表...");
                     SendModuleToClient(clientId, CMD_LOAD_MODULE, L"RegistryManager.dll", CMD_REGISTRY_CTRL);
@@ -1100,7 +1107,7 @@ void HandleCommand(HWND hWnd, int id) {
             }
             auto& client = pair.second;
             info += L"• " + UTF8ToWide(client->ip) + L" - " + 
-                    UTF8ToWide(client->computerName) + L"\n";
+                    UTF8ToWide(client->info.computerName) + L"\n";
         }
         
         MessageBoxW(hWnd, info.c_str(), L"历史主机", MB_OK | MB_ICONINFORMATION);

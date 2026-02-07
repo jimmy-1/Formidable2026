@@ -44,17 +44,6 @@ struct ConnectedClient {
 
     // 客户端信息
     ClientInfo info;
-    char computerName[64];
-    char userName[64];
-    char osVersion[128];
-    char cpuName[64];
-    char clientIp[64];
-    uint32_t ram;
-    char videoCard[128];
-    char macAddress[32];
-    uint32_t screen_width;
-    uint32_t screen_height;
-    char location[128];
     int listIndex; // ListView index in master UI
     
     // 群控功能字段
@@ -89,7 +78,7 @@ struct ConnectedClient {
     void* pAudioDecoder;  // FFmpeg AVCodecContext* 用于 MP3 解码
 
     ConnectedClient() : clientId(0), connId(0), port(0), active(false), 
-                        lastHeartbeat(0), ram(0), screen_width(0), screen_height(0),
+                        lastHeartbeat(0),
                         hProcessDlg(NULL), hModuleDlg(NULL), hTerminalDlg(NULL),
                         hServiceDlg(NULL), hRegistryDlg(NULL), hDesktopDlg(NULL),
                         hWindowDlg(NULL), hFileDlg(NULL), hKeylogDlg(NULL),
@@ -97,14 +86,6 @@ struct ConnectedClient {
                         isMonitoring(false), info{}, listIndex(-1),
                         hFileDownload(INVALID_HANDLE_VALUE),
                         hWaveOut(NULL), pAudioDecoder(NULL) {
-        memset(computerName, 0, sizeof(computerName));
-        memset(userName, 0, sizeof(userName));
-        memset(osVersion, 0, sizeof(osVersion));
-        memset(cpuName, 0, sizeof(cpuName));
-        memset(clientIp, 0, sizeof(clientIp));
-        memset(videoCard, 0, sizeof(videoCard));
-        memset(macAddress, 0, sizeof(macAddress));
-        memset(location, 0, sizeof(location));
     }
 };
 

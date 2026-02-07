@@ -2,9 +2,15 @@
 #ifndef NETWORKHELPER_H
 #define NETWORKHELPER_H
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <winsock2.h>
 #include <windows.h>
 #include <string>
 #include <memory>
+#include <vector>
 #include "../Common/ClientTypes.h"
 
 // 网络相关函数

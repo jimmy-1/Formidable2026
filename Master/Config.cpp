@@ -1,8 +1,11 @@
 ﻿#include "Config.h"
 #include "GlobalState.h"
-#include "../Common/Config.h"  // For DEFAULT_PORT
+#include "../Common/Config.h"
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
-#include <stdio.h> // for swprintf_s
+#include <stdio.h>
 
 // 配置持久化
 void LoadSettings() {

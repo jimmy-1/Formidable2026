@@ -1,7 +1,6 @@
 ﻿// TerminalDialog.cpp - 终端对话框实现
 #include "TerminalDialog.h"
 #include "../resource.h"
-#include "../StringUtils.h"
 #include "../../Common/Config.h"
 #include "../../Common/ClientTypes.h"
 #include "../Utils/StringHelper.h"
@@ -105,6 +104,9 @@ INT_PTR CALLBACK TerminalDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         SendDlgItemMessage(hDlg, IDC_EDIT_TERM_OUT, WM_SETFONT, (WPARAM)g_hTermFont, TRUE);
         SendDlgItemMessage(hDlg, IDC_EDIT_TERM_IN, WM_SETFONT, (WPARAM)g_hTermFont, TRUE);
         SendDlgItemMessage(hDlg, IDC_EDIT_TERM_OUT, EM_SETLIMITTEXT, 0, 0);
+        
+        EnableWindow(hEditIn, TRUE);
+        SendMessageW(hEditIn, EM_SETREADONLY, FALSE, 0);
 
         std::shared_ptr<Formidable::ConnectedClient> client;
         {
@@ -226,8 +228,8 @@ INT_PTR CALLBACK TerminalDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
     return (INT_PTR)FALSE;
 }
 
-void TerminalDialog::Show(HWND hParent, uint32_t clientId) {
-    CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_TERMINAL), hParent, DlgProc, (LPARAM)clientId);
+HWND TerminalDialog::Show(HWND hParent, uint32_t clientId) {
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_TERMINAL), hParent, DlgProc, (LPARAM)clientId);
 }
 
 } // namespace UI

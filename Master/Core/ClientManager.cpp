@@ -25,19 +25,7 @@ std::shared_ptr<Formidable::ConnectedClient> ClientManager::CreateClient(CONNID 
 void ClientManager::UpdateClientInfo(std::shared_ptr<Formidable::ConnectedClient> client, const Formidable::ClientInfo& info) {
     if (!client) return;
     
-    strncpy_s(client->computerName, sizeof(client->computerName), info.computerName, _TRUNCATE);
-    strncpy_s(client->userName, sizeof(client->userName), info.userName, _TRUNCATE);
-    strncpy_s(client->osVersion, sizeof(client->osVersion), info.osVersion, _TRUNCATE);
-    strncpy_s(client->cpuName, sizeof(client->cpuName), info.cpuInfo, _TRUNCATE);
-    strncpy_s(client->clientIp, sizeof(client->clientIp), info.lanAddr, _TRUNCATE);
-    client->ram = 0; // Config.h doesn't have ram field in ClientInfo, using default or extracting from somewhere else if needed
-    // Note: ClientInfo in Config.h has different fields than what was used here.
-    // I will map them as best as possible.
-    
-    // client->videoCard is not in ClientInfo
-    // client->macAddress is not in ClientInfo
-    client->screen_width = 0; 
-    client->screen_height = 0;
+    memcpy(&client->info, &info, sizeof(Formidable::ClientInfo));
 }
 
 std::shared_ptr<Formidable::ConnectedClient> ClientManager::GetClientByConnId(CONNID connId) {

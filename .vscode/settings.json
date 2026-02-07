@@ -1,0 +1,8 @@
+{
+    "C_Cpp.errorSquiggles": "disabledInThirdPartyFiles",
+    "C_Cpp.default.diagnosticSeverityOverrides": {
+        "type_traits": "None"
+    },
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.configurationProvider": "ms-vscode.cpptools"
+}

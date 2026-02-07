@@ -67,11 +67,14 @@ NetworkServer::NetworkServer()
     : m_pServer(&m_listener)
     , m_bStarted(false)
 {
-    // 设置 Socket 参数
-    m_pServer->SetMaxConnectionCount(10000);  // 支持10000并发
-    m_pServer->SetSocketBufferSize(8192);      // 缓冲区8KB
-    m_pServer->SetKeepAliveTime(60000);        // 心跳60秒
-    m_pServer->SetKeepAliveInterval(10000);    // 心跳间隔10秒
+    if (m_pServer.IsValid()) {
+        // 设置 Socket 参数
+        m_pServer->SetDualStack(FALSE);           // 关闭双栈，优先使用 IPv4
+        m_pServer->SetMaxConnectionCount(10000);  // 支持10000并发
+        m_pServer->SetSocketBufferSize(8192);      // 缓冲区8KB
+        m_pServer->SetKeepAliveTime(60000);        // 心跳60秒
+        m_pServer->SetKeepAliveInterval(10000);    // 心跳间隔10秒
+    }
 }
 
 NetworkServer::~NetworkServer()
@@ -85,13 +88,21 @@ bool NetworkServer::Start(const char* bindIP, USHORT port)
         return true;
     }
 
+    if (!m_pServer.IsValid()) {
+        return false;
+    }
+
     // 将char*转换为wchar_t*
     wchar_t szBindIP[50] = { 0 };
-    MultiByteToWideChar(CP_ACP, 0, bindIP, -1, szBindIP, 50);
+    TCHAR* pszBindAddr = nullptr;
+
+    if (bindIP && strcmp(bindIP, "0.0.0.0") != 0 && strlen(bindIP) > 0) {
+        MultiByteToWideChar(CP_ACP, 0, bindIP, -1, szBindIP, 50);
+        pszBindAddr = (TCHAR*)szBindIP;
+    }
     
-    if (!m_pServer->Start((TCHAR*)szBindIP, port)) {
-        // 启动失败，保存错误码供外部查询
-        // HPSocket错误码已经保存在内部
+    if (!m_pServer->Start(pszBindAddr, port)) {
+        // 启动失败，错误码已保存在 HPSocket 对象中
         return false;
     }
 
