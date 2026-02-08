@@ -44,6 +44,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
         if (hComboExeType) {
             SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.exe");
+            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.dll");
+            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"ShellCode");
             SendMessageW(hComboExeType, CB_SETCURSEL, 0, 0);
         }
         
@@ -187,16 +189,36 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 // ... logic for both handled by BuildOne callers
             }
 
+            // 获取生成类型
+            wchar_t szExeType[64];
+            GetDlgItemTextW(hDlg, IDC_COMBO_EXE_TYPE, szExeType, 64);
+            std::wstring sExeType = szExeType;
+            bool isDll = (sExeType == L"Client.dll");
+            bool isShellCode = (sExeType == L"ShellCode");
+
             // 从内存加载模块
-            wchar_t szSavePath[MAX_PATH] = L"Formidable_Client.exe";
+            wchar_t szSavePath[MAX_PATH] = L"Client.exe";
+            if (isDll) wcscpy_s(szSavePath, L"Client.dll");
+            else if (isShellCode) wcscpy_s(szSavePath, L"Client.bin");
+
             OPENFILENAMEW ofn = { 0 };
             ofn.lStructSize = sizeof(ofn);
             ofn.hwndOwner = hDlg;
-            ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
+            
+            if (isDll) {
+                ofn.lpstrFilter = L"动态链接库 (*.dll)\0*.dll\0所有文件 (*.*)\0*.*\0";
+                ofn.lpstrDefExt = L"dll";
+            } else if (isShellCode) {
+                ofn.lpstrFilter = L"二进制文件 (*.bin)\0*.bin\0所有文件 (*.*)\0*.*\0";
+                ofn.lpstrDefExt = L"bin";
+            } else {
+                ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
+                ofn.lpstrDefExt = L"exe";
+            }
+
             ofn.lpstrFile = szSavePath;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-            ofn.lpstrDefExt = L"exe";
             ofn.lpstrTitle = L"保存客户端";
 
             if (!GetSaveFileNameW(&ofn)) return (INT_PTR)TRUE;
@@ -205,21 +227,53 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             
             auto BuildOne = [&](bool x64, const std::wstring& dest) -> bool {
                 std::vector<char> buffer;
-                int resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
-                if (!GetResourceData(resId, buffer)) {
+                // 资源ID暂且保留，若资源不存在则回退到文件加载
+                int resId = 0;
+                if (!isDll && !isShellCode) resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
+                // DLL和ShellCode暂无资源定义，直接走文件加载逻辑
+                
+                if (resId == 0 || !GetResourceData(resId, buffer)) {
                     // 如果资源不存在，尝试从本地文件加载
                     wchar_t szExePath[MAX_PATH];
                     GetModuleFileNameW(NULL, szExePath, MAX_PATH);
                     std::wstring currentDir = szExePath;
                     currentDir = currentDir.substr(0, currentDir.find_last_of(L"\\/"));
                     
-                    std::wstring clientPath = currentDir + (x64 ? L"\\x64\\Client.exe" : L"\\x86\\Client.exe");
-                    // 尝试在上一级目录找
-                    if (GetFileAttributesW(clientPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                        clientPath = currentDir + (x64 ? L"\\..\\x64\\Client.exe" : L"\\..\\x86\\Client.exe");
-                    }
+                    std::wstring fileName;
+                    if (isDll) fileName = L"ClientDLL.dll";
+                    else if (isShellCode) fileName = L"ShellCodeLoader.bin"; // 假设Loader已编译为bin
+                    else fileName = L"Client.exe";
+
+                    // 搜索路径优先级:
+                    // 1. 同级目录 (例如 x64/Client.exe)
+                    // 2. 兄弟架构目录 (例如 ../x86/Client.exe)
+                    // 3. 原有逻辑子目录 (例如 x64/x64/Client.exe)
                     
-                    HANDLE hFile = CreateFileW(clientPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    std::vector<std::wstring> searchPaths;
+                    
+                    // 路径1: 同级目录
+                    searchPaths.push_back(currentDir + L"\\" + fileName);
+                    
+                    // 路径2: 跨架构目录 (假设当前是x64/Master.exe，找 ../x86/Client.exe)
+                    if (x64) {
+                         // 如果当前是x64，找同级
+                         // 如果当前是x86 (Master)，找 ../x64/
+                         searchPaths.push_back(currentDir + L"\\..\\x64\\" + fileName);
+                    } else {
+                         // 找 x86
+                         searchPaths.push_back(currentDir + L"\\..\\x86\\" + fileName);
+                    }
+
+                    // 路径3: 原有逻辑 (子目录)
+                    searchPaths.push_back(currentDir + (x64 ? L"\\x64\\" : L"\\x86\\") + fileName);
+                    searchPaths.push_back(currentDir + (x64 ? L"\\..\\x64\\" : L"\\..\\x86\\") + fileName);
+
+                    HANDLE hFile = INVALID_HANDLE_VALUE;
+                    for (const auto& path : searchPaths) {
+                        hFile = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                        if (hFile != INVALID_HANDLE_VALUE) break;
+                    }
+
                     if (hFile != INVALID_HANDLE_VALUE) {
                         DWORD size = GetFileSize(hFile, NULL);
                         buffer.resize(size);
@@ -227,6 +281,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         ReadFile(hFile, buffer.data(), size, &read, NULL);
                         CloseHandle(hFile);
                     } else {
+                        MessageBoxW(hDlg, (L"无法找到模板文件: " + fileName).c_str(), L"错误", MB_ICONERROR);
                         return false;
                     }
                 }
@@ -370,15 +425,26 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 }
                 
                 std::wstring pathX64 = baseSavePath;
+                dotPos = pathX64.find_last_of(L'.'); // Re-find
                 if (dotPos != std::wstring::npos) {
                     pathX64.insert(dotPos, L"_x64");
                 } else {
                     pathX64 += L"_x64";
                 }
                 
-                success = BuildOne(false, pathX86) && BuildOne(true, pathX64);
+                // 尝试构建两个版本，只要有一个成功就算成功（防止其中一个模板缺失导致全失败）
+                bool b86 = BuildOne(false, pathX86);
+                bool b64 = BuildOne(true, pathX64);
+                success = b86 || b64;
+                
+                if (!b86 && !b64) {
+                    MessageBoxW(hDlg, L"生成失败：无法找到任何架构的模板文件", L"错误", MB_ICONERROR);
+                }
             } else {
                 success = BuildOne(is64Bit, baseSavePath);
+                if (!success) {
+                    // BuildOne 内部已弹窗
+                }
             }
 
             if (success) {
