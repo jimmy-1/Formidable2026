@@ -5,6 +5,11 @@
 
 using namespace Formidable;
 
+// 导出函数，供 rundll32 调用 (rundll32 ClientDLL.dll,Start)
+extern "C" __declspec(dllexport) void Start() {
+    // 只是为了提供一个导出入口，实际逻辑在 DllMain 或 ClientThread 中
+}
+
 // DLL 版本的客户端入口线程
 void ClientThread() {
     InitClientCore();
