@@ -25,5 +25,8 @@ public:
     static HWND Show(HWND hParent, uint32_t clientId);
 };
 
+// 自定义消息：向终端追加文本
+#define WM_TERMINAL_APPEND_TEXT (WM_USER + 1001)
+
 } // namespace UI
 } // namespace Formidable

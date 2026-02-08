@@ -155,6 +155,13 @@ msbuild Formidable2026.sln /p:Configuration=Debug /p:Platform=x64 /m
 - 支持复杂表达式计算
 ```
 
+#### UI 调试技巧
+```
+- 对于 Dialog 初始化时需要进行网络通信的场景（如获取列表），建议使用 SetTimer 延迟执行，
+  避免 WM_INITDIALOG 尚未返回时网络模块未就绪导致的数据丢失。
+- 使用 Spy++ 查看窗口消息和句柄状态。
+```
+
 #### 调用堆栈
 ```
 - 调试 → 窗口 → 调用堆栈

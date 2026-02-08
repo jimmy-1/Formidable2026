@@ -112,7 +112,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x64\static\HPSocket_D.lib;ws2_32.lib;mswsock.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x64\static\HPSocket_D.lib;ws2_32.lib;mswsock.lib;comctl32.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -135,8 +135,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x86\static\HPSocket.lib;ws2_32.lib;mswsock.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <EmbedManifest>false</EmbedManifest>
+      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x86\static\HPSocket.lib;ws2_32.lib;mswsock.lib;comctl32.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -159,8 +158,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x64\static\HPSocket.lib;ws2_32.lib;mswsock.lib;comctl32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <EmbedManifest>false</EmbedManifest>
+      <AdditionalDependencies>..\thirdparty\Lib\HPSocket\x64\static\HPSocket.lib;ws2_32.lib;mswsock.lib;comctl32.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -189,6 +187,7 @@
     <ClCompile Include="UI\FileManagerUI.cpp" />
     <ClCompile Include="UI\DesktopDialog.cpp" />
     <ClCompile Include="UI\RegistryDialog.cpp" />
+    <ClCompile Include="UI\HistoryDialog.cpp" />
     <ClCompile Include="..\Common\Utils.cpp" />
     <ClCompile Include="..\Common\NetworkServer.cpp" />
     <ClCompile Include="Core\ClientManager.cpp" />
@@ -217,6 +216,11 @@
     <ClInclude Include="UI\AudioDialog.h" />
     <ClInclude Include="UI\VideoDialog.h" />
     <ClInclude Include="UI\KeylogDialog.h" />
+    <ClInclude Include="UI\HistoryDialog.h" />
+    <ClInclude Include="UI\TerminalDialog.h" />
+    <ClInclude Include="UI\FileDialog.h" />
+    <ClInclude Include="UI\DesktopDialog.h" />
+    <ClInclude Include="UI\RegistryDialog.h" />
     <!-- 工具模块 -->
     <ClInclude Include="Utils\StringHelper.h" />
     <ClInclude Include="Utils\CommonHelpers.h" />

@@ -70,19 +70,39 @@ struct ServerSettings {
     int frpRemotePort;
     wchar_t szFrpProxyName[64];
     int frpDownloadPort; // 下载端口
+
+    // 桌面管理设置
+    int screenCaptureMethod; // 0=GDI, 1=DirectX
+    int imageCompressMethod; // 0=JPEG, 1=PNG
+    bool enableMultiMonitor; // 是否启用多显示器支持
+    bool useDiffTransmission; // 是否使用差异传输
 };
 extern ServerSettings g_Settings;
 
 // 窗口预览图缓存 (HWND -> HBITMAP)
 extern std::map<HWND, HBITMAP> g_WindowPreviews;
 
-// ListView排序信息
-struct ListViewSortInfo {
-    int column;
-    bool ascending;
-    HWND hwndList;
+extern std::map<HWND, Formidable::ListViewSortInfo> g_SortInfo;
+
+// 预存的备注信息 (UniqueKey -> Remark)
+extern std::map<std::wstring, std::wstring> g_SavedRemarks;
+extern std::mutex g_SavedRemarksMutex;
+
+// 历史主机信息
+struct HistoryHost {
+    uint64_t clientUniqueId = 0;
+    std::wstring location;
+    std::wstring ip;
+    std::wstring computerName;
+    std::wstring userName;
+    std::wstring osVersion;
+    std::wstring installTime;
+    std::wstring lastSeen;
+    std::wstring remark;
+    std::wstring programPath;
 };
-extern std::map<HWND, ListViewSortInfo> g_SortInfo;
+extern std::map<std::wstring, HistoryHost> g_HistoryHosts; // uniqueKey -> HistoryHost
+extern std::mutex g_HistoryHostsMutex;
 
 // 排序回调
 int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort);

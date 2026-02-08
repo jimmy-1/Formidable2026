@@ -8,8 +8,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <objbase.h>
 #include <objidl.h>
 #include <mmsystem.h>
@@ -21,16 +24,24 @@
 #include "../../Common/Utils.h"
 #include "../resource.h"
 #include "../GlobalState.h"
+#include "../NetworkHelper.h"
+#include "../MainWindow.h"
 #include "../Utils/StringHelper.h"
+#include "../UI/TerminalDialog.h"
 #include <CommCtrl.h>
+#include <shellapi.h>
+#include <map>
 #include <mutex>
 #include <thread>
+#include <sstream>
 
 #pragma comment(lib, "gdiplus.lib")
 
 using namespace Gdiplus;
 
 using namespace Formidable;
+
+static std::map<uint32_t, int> s_screenLogState;
 using namespace Formidable::Utils;
 
 // 外部声明
@@ -46,6 +57,7 @@ namespace Core {
 
 // 自定义消息
 #define WM_LOC_UPDATE (WM_USER + 101)
+#define WM_UPDATE_PROGRESS (WM_USER + 201)
 
 
 void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLength) {
@@ -91,6 +103,9 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
             HandleModuleList(clientId, pkg, iLength);
             break;
         case Formidable::CMD_SERVICE_LIST:
+        case Formidable::CMD_SERVICE_START:
+        case Formidable::CMD_SERVICE_STOP:
+        case Formidable::CMD_SERVICE_DELETE:
             HandleServiceList(clientId, pkg, iLength);
             break;
         case Formidable::CMD_WINDOW_LIST:
@@ -113,6 +128,9 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
             break;
         case Formidable::CMD_FILE_LIST:
             HandleFileList(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_DRIVE_LIST:
+            HandleDriveList(clientId, pkg, iLength);
             break;
         case Formidable::CMD_FILE_DATA:
             HandleFileData(clientId, pkg, iLength);
@@ -157,6 +175,31 @@ void CommandHandler::HandleHeartbeat(uint32_t clientId, const Formidable::Comman
             memcpy(&client->info, newInfo, sizeof(Formidable::ClientInfo));
             client->info.rtt = rtt;
 
+            {
+                std::wstring computerName = Utils::StringHelper::UTF8ToWide(client->info.computerName);
+                std::wstring userName = Utils::StringHelper::UTF8ToWide(client->info.userName);
+                std::wstring uniqueKey = computerName + L"_" + userName;
+
+                if (!computerName.empty() || !userName.empty()) {
+                    std::lock_guard<std::mutex> lockHist(g_HistoryHostsMutex);
+                    HistoryHost& hist = g_HistoryHosts[uniqueKey];
+                    hist.clientUniqueId = client->info.clientUniqueId;
+                    hist.ip = Utils::StringHelper::UTF8ToWide(client->ip);
+                    hist.computerName = computerName;
+                    hist.userName = userName;
+                    hist.osVersion = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
+                    hist.installTime = Utils::StringHelper::UTF8ToWide(client->info.installTime);
+                    hist.programPath = Utils::StringHelper::UTF8ToWide(client->info.programPath);
+                    hist.remark = client->remark;
+
+                    SYSTEMTIME st;
+                    GetLocalTime(&st);
+                    wchar_t szTime[64];
+                    swprintf_s(szTime, L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+                    hist.lastSeen = szTime;
+                }
+            }
+
             // 更新 UI
             std::wstring wRTT = std::to_wstring(rtt) + L"ms";
             std::wstring wActWin = Utils::StringHelper::UTF8ToWide(client->info.activeWindow);
@@ -164,15 +207,15 @@ void CommandHandler::HandleHeartbeat(uint32_t clientId, const Formidable::Comman
 
             if (client->listIndex >= 0) {
         LVITEMW lvi = { 0 };
-        lvi.iSubItem = 9; // RTT
+        lvi.iSubItem = 7; // RTT
         lvi.pszText = (LPWSTR)wRTT.c_str();
         SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
         
-        lvi.iSubItem = 12; // Uptime
+        lvi.iSubItem = 10; // Uptime
         lvi.pszText = (LPWSTR)wUptime.c_str();
         SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
         
-        lvi.iSubItem = 13; // Active Window
+        lvi.iSubItem = 11; // Active Window
         lvi.pszText = (LPWSTR)wActWin.c_str();
         SendMessageW(g_hListClients, LVM_SETITEMTEXTW, client->listIndex, (LPARAM)&lvi);
     } else {
@@ -196,8 +239,40 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     memcpy(&client->info, info, sizeof(Formidable::ClientInfo));
     
     // 同步备注和分组
-    if (client->remark.empty() && info->remark[0] != L'\0') client->remark = info->remark;
+    std::wstring computerName = Utils::StringHelper::UTF8ToWide(client->info.computerName);
+    std::wstring userName = Utils::StringHelper::UTF8ToWide(client->info.userName);
+    std::wstring uniqueKey = computerName + L"_" + userName;
+
+    {
+        std::lock_guard<std::mutex> lock(g_SavedRemarksMutex);
+        if (g_SavedRemarks.count(uniqueKey)) {
+            client->remark = g_SavedRemarks[uniqueKey];
+        } else if (info->remark[0] != L'\0') {
+            client->remark = info->remark;
+        }
+    }
+
     if (client->group.empty() && info->group[0] != L'\0') client->group = info->group;
+    
+    // 更新历史记录
+    {
+        std::lock_guard<std::mutex> lockHist(g_HistoryHostsMutex);
+        HistoryHost& hist = g_HistoryHosts[uniqueKey];
+        hist.clientUniqueId = client->info.clientUniqueId;
+        hist.installTime = Utils::StringHelper::UTF8ToWide(client->info.installTime);
+        hist.programPath = Utils::StringHelper::UTF8ToWide(client->info.programPath);
+        hist.ip = Utils::StringHelper::UTF8ToWide(client->ip);
+        hist.computerName = computerName;
+        hist.userName = userName;
+        hist.osVersion = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
+        
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        wchar_t szTime[64];
+        swprintf_s(szTime, L"%04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+        hist.lastSeen = szTime;
+        hist.remark = client->remark;
+    }
     
     std::wstring wIP = Utils::StringHelper::UTF8ToWide(client->ip);
     int index = client->listIndex;
@@ -226,11 +301,9 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     } else {
         // 更新第一列（IP）
         LVITEMW lvi = { 0 };
-        lvi.iItem = index;
         lvi.iSubItem = 0;
-        lvi.mask = LVIF_TEXT;
         lvi.pszText = (LPWSTR)wIP.c_str();
-        SendMessageW(g_hListClients, LVM_SETITEMW, 0, (LPARAM)&lvi);
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lvi);
     }
     
     std::wstring wPort = std::to_wstring(client->port);
@@ -238,7 +311,6 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     std::wstring wComp = Utils::StringHelper::UTF8ToWide(client->info.computerName);
     std::wstring wUserGroup = Utils::StringHelper::UTF8ToWide(client->info.userName) + L"/" + client->info.group;
     std::wstring wOS = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
-    std::wstring wCPU = Utils::StringHelper::UTF8ToWide(client->info.cpuInfo);
     std::wstring wRTT = std::to_wstring(client->info.rtt) + L"ms";
     std::wstring wVer = Utils::StringHelper::UTF8ToWide(client->info.version);
     std::wstring wInst = Utils::StringHelper::UTF8ToWide(client->info.installTime);
@@ -264,30 +336,32 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     lviSet.iSubItem = 6; lviSet.pszText = (LPWSTR)wOS.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 7; lviSet.pszText = (LPWSTR)wCPU.c_str();
+    lviSet.iSubItem = 7; lviSet.pszText = (LPWSTR)wRTT.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 8; lviSet.pszText = (LPWSTR)L"Unknown"; // RAM
+    lviSet.iSubItem = 8; lviSet.pszText = (LPWSTR)wVer.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 9; lviSet.pszText = (LPWSTR)wRTT.c_str();
+    lviSet.iSubItem = 9; lviSet.pszText = (LPWSTR)wInst.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 10; lviSet.pszText = (LPWSTR)wVer.c_str();
+    lviSet.iSubItem = 10; lviSet.pszText = (LPWSTR)wUptime.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 11; lviSet.pszText = (LPWSTR)wInst.c_str();
+    lviSet.iSubItem = 11; lviSet.pszText = (LPWSTR)wActWin.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 12; lviSet.pszText = (LPWSTR)wUptime.c_str();
+    lviSet.iSubItem = 12; lviSet.pszText = (LPWSTR)client->remark.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 13; lviSet.pszText = (LPWSTR)wActWin.c_str();
+    std::wstring wCamera = client->info.hasCamera ? L"是" : L"否";
+    lviSet.iSubItem = 13; lviSet.pszText = (LPWSTR)wCamera.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
-    
-    lviSet.iSubItem = 14; lviSet.pszText = (LPWSTR)client->remark.c_str();
+
+    std::wstring wTelegram = client->info.hasTelegram ? L"是" : L"否";
+    lviSet.iSubItem = 14; lviSet.pszText = (LPWSTR)wTelegram.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
-    
+
     SendMessageW(g_hListClients, WM_SETREDRAW, TRUE, 0);
 
     // 异步获取地理位置
@@ -385,10 +459,11 @@ void CommandHandler::HandleModuleList(uint32_t clientId, const Formidable::Comma
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
         for (int i = 0; i < count; i++) {
             LVITEMW lvi = { 0 };
-            lvi.mask = LVIF_TEXT;
+            lvi.mask = LVIF_TEXT | LVIF_PARAM;
             lvi.iItem = i;
             std::wstring wName = Formidable::Utils::StringHelper::UTF8ToWide(pInfo[i].name);
             lvi.pszText = (LPWSTR)wName.c_str();
+            lvi.lParam = (LPARAM)pInfo[i].baseAddr;
 
             int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
 
@@ -418,14 +493,11 @@ void CommandHandler::HandleTerminalData(uint32_t clientId, const Formidable::Com
     }
 
     if (client->hTerminalDlg && IsWindow(client->hTerminalDlg)) {
-        HWND hEdit = GetDlgItem(client->hTerminalDlg, IDC_EDIT_TERM_OUT);
         std::string text(pkg->data, pkg->arg1);
         std::wstring wText = Utils::StringHelper::UTF8ToWide(text);
         
-        int len = GetWindowTextLengthW(hEdit);
-        SendMessageW(hEdit, EM_SETSEL, len, len);
-        SendMessageW(hEdit, EM_REPLACESEL, FALSE, (LPARAM)wText.c_str());
-        SendMessageW(hEdit, WM_VSCROLL, SB_BOTTOM, 0);
+        // 使用自定义消息发送数据，让对话框自己处理
+        SendMessageW(client->hTerminalDlg, WM_TERMINAL_APPEND_TEXT, 0, (LPARAM)wText.c_str());
     }
 }
 
@@ -442,24 +514,50 @@ void CommandHandler::HandleWindowList(uint32_t clientId, const Formidable::Comma
         ListView_DeleteAllItems(hList);
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
 
-        int count = pkg->arg1 / sizeof(Formidable::WindowInfo);
-        Formidable::WindowInfo* pInfo = (Formidable::WindowInfo*)pkg->data;
+        // 客户端发送的是字符串格式，格式为：hwnd|className|title\n
+        std::string data(pkg->data, pkg->arg1);
+        std::istringstream ss(data);
+        std::string line;
+        int index = 0;
 
-        for (int i = 0; i < count; i++) {
-            std::wstring wTitle = Utils::StringHelper::UTF8ToWide(pInfo[i].title);
-            std::wstring wStatus = pInfo[i].isVisible ? L"可见" : L"隐藏";
-            
+        while (std::getline(ss, line)) {
+            if (line.empty()) continue;
+
+            // 解析每行数据：hwnd|className|title
+            size_t pos1 = line.find('|');
+            if (pos1 == std::string::npos) continue;
+            size_t pos2 = line.find('|', pos1 + 1);
+            if (pos2 == std::string::npos) continue;
+
+            std::string hwndStr = line.substr(0, pos1);
+            std::string classNameStr = line.substr(pos1 + 1, pos2 - pos1 - 1);
+            std::string titleStr = line.substr(pos2 + 1);
+
+            // 转换hwnd
+            uint64_t hwnd = 0;
+            try {
+                hwnd = std::stoull(hwndStr);
+            } catch (...) {
+                continue;
+            }
+
+            std::wstring wTitle = Utils::StringHelper::UTF8ToWide(titleStr);
+            std::wstring wStatus = L"可见";
+
             wchar_t szHwnd[32];
-            swprintf_s(szHwnd, L"0x%016llX", pInfo[i].hWnd);
+            swprintf_s(szHwnd, L"0x%016llX", hwnd);
 
             LVITEMW lvi = { 0 };
-            lvi.mask = LVIF_TEXT;
-            lvi.iItem = i;
+            lvi.mask = LVIF_TEXT | LVIF_PARAM;
+            lvi.iItem = index;
             lvi.pszText = (LPWSTR)wTitle.c_str();
+            lvi.lParam = (LPARAM)hwnd;
             int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
 
             ListView_SetItemText(hList, idx, 1, szHwnd);
             ListView_SetItemText(hList, idx, 2, (LPWSTR)wStatus.c_str());
+
+            index++;
         }
         SendMessage(hList, WM_SETREDRAW, TRUE, 0);
     }
@@ -529,38 +627,73 @@ void CommandHandler::HandleServiceList(uint32_t clientId, const Formidable::Comm
     }
 
     if (client->hServiceDlg && IsWindow(client->hServiceDlg)) {
+        std::string data(pkg->data, pkg->arg1);
+        
+        // 检查是否是控制命令的响应 (OK/FAIL)
+        if (data == "OK" || data == "FAIL") {
+            if (data == "OK") {
+                // 操作成功，自动刷新列表
+                Formidable::CommandPkg refreshPkg = { 0 };
+                refreshPkg.cmd = Formidable::CMD_SERVICE_LIST;
+                refreshPkg.arg1 = 0;
+                
+                size_t bodySize = sizeof(Formidable::CommandPkg);
+                std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
+                Formidable::PkgHeader* header = (Formidable::PkgHeader*)buffer.data();
+                memcpy(header->flag, "FRMD26?", 7);
+                header->originLen = (int)bodySize;
+                header->totalLen = (int)buffer.size();
+                memcpy(buffer.data() + sizeof(Formidable::PkgHeader), &refreshPkg, bodySize);
+                
+                SendDataToClient(client, buffer.data(), (int)buffer.size());
+            } else {
+                MessageBoxW(client->hServiceDlg, L"服务操作失败，请检查权限。", L"错误", MB_ICONERROR);
+            }
+            return;
+        }
+
         HWND hList = GetDlgItem(client->hServiceDlg, IDC_LIST_SERVICE);
         ListView_DeleteAllItems(hList);
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
 
-        int count = pkg->arg1 / sizeof(Formidable::ServiceInfo);
-        Formidable::ServiceInfo* pInfo = (Formidable::ServiceInfo*)pkg->data;
+        std::stringstream ss(data);
+        std::string line;
+        int index = 0;
 
-        for (int i = 0; i < count; i++) {
-            std::wstring wName = Utils::StringHelper::UTF8ToWide(pInfo[i].name);
-            std::wstring wDisp = Utils::StringHelper::UTF8ToWide(pInfo[i].displayName);
-            std::wstring wStatus;
-            switch (pInfo[i].status) {
-                case SERVICE_STOPPED: wStatus = L"已停止"; break;
-                case SERVICE_START_PENDING: wStatus = L"启动中"; break;
-                case SERVICE_STOP_PENDING: wStatus = L"停止中"; break;
-                case SERVICE_RUNNING: wStatus = L"正在运行"; break;
-                default: wStatus = L"未知"; break;
-            }
+        while (std::getline(ss, line)) {
+            if (line.empty()) continue;
+            
+            // 格式: 服务名|显示名|状态|启动类型|二进制路径|服务类型
+            size_t p1 = line.find('|');
+            size_t p2 = line.find('|', p1 + 1);
+            size_t p3 = line.find('|', p2 + 1);
+            size_t p4 = line.find('|', p3 + 1);
+            size_t p5 = line.find('|', p4 + 1);
+            
+            if (p1 == std::string::npos || p2 == std::string::npos || p3 == std::string::npos || 
+                p4 == std::string::npos || p5 == std::string::npos) continue;
+
+            std::wstring wName = Utils::StringHelper::UTF8ToWide(line.substr(0, p1));
+            std::wstring wDisp = Utils::StringHelper::UTF8ToWide(line.substr(p1 + 1, p2 - p1 - 1));
+            std::wstring wStatus = Utils::StringHelper::UTF8ToWide(line.substr(p2 + 1, p3 - p2 - 1));
+            std::wstring wStartType = Utils::StringHelper::UTF8ToWide(line.substr(p3 + 1, p4 - p3 - 1));
+            std::wstring wPath = Utils::StringHelper::UTF8ToWide(line.substr(p4 + 1, p5 - p4 - 1));
+            std::wstring wServiceType = Utils::StringHelper::UTF8ToWide(line.substr(p5 + 1));
 
             LVITEMW lvi = { 0 };
-            lvi.mask = LVIF_TEXT;
-            lvi.iItem = i;
+            lvi.mask = LVIF_TEXT | LVIF_PARAM;
+            lvi.iItem = index;
             lvi.pszText = (LPWSTR)wName.c_str();
+            lvi.lParam = index;
             int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
 
-            LVITEMW lviSet = { 0 };
-            lviSet.iSubItem = 1; lviSet.pszText = (LPWSTR)wDisp.c_str();
-            SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
-            lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)wStatus.c_str();
-            SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
-            lviSet.iSubItem = 3; lviSet.pszText = (pInfo[i].startType == SERVICE_AUTO_START) ? (LPWSTR)L"自动" : (pInfo[i].startType == SERVICE_DEMAND_START ? (LPWSTR)L"手动" : (LPWSTR)L"禁用");
-            SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
+            ListView_SetItemText(hList, idx, 1, (LPWSTR)wDisp.c_str());
+            ListView_SetItemText(hList, idx, 2, (LPWSTR)wStatus.c_str());
+            ListView_SetItemText(hList, idx, 3, (LPWSTR)wStartType.c_str());
+            ListView_SetItemText(hList, idx, 4, (LPWSTR)wServiceType.c_str());
+            ListView_SetItemText(hList, idx, 5, (LPWSTR)wPath.c_str());
+            
+            index++;
         }
         SendMessage(hList, WM_SETREDRAW, TRUE, 0);
     }
@@ -596,7 +729,7 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
         std::stringstream ss(data);
         std::string line;
 
-        if (pkg->arg2 == 0) { // Keys for Tree
+        if (pkg->arg2 == 1) { // Keys for Tree (Updated from 0 to 1 to match module)
              HTREEITEM hSelected = TreeView_GetSelection(hTree);
              if (hSelected) {
                  // 删除旧子项
@@ -607,35 +740,52 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                      hChild = hNext;
                  }
                  
+                 // 获取父节点的 lParam (根键索引)
+                 TVITEMW tviParent = { 0 };
+                 tviParent.mask = TVIF_PARAM;
+                 tviParent.hItem = hSelected;
+                 uint32_t rootIdx = 0;
+                 if (TreeView_GetItem(hTree, &tviParent)) {
+                     rootIdx = (uint32_t)tviParent.lParam;
+                 }
+
                  while (std::getline(ss, line)) {
                      if (line.empty()) continue;
-                     std::wstring wKey = Utils::StringHelper::UTF8ToWide(line);
+                     // 格式: K|键名
+                     size_t pos = line.find('|');
+                     if (pos == std::string::npos) continue;
+                     std::string keyName = line.substr(pos + 1);
+                     std::wstring wKey = Utils::StringHelper::UTF8ToWide(keyName);
                      TVINSERTSTRUCTW tvis = { 0 };
                      tvis.hParent = hSelected;
                      tvis.hInsertAfter = TVI_LAST;
-                     tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN;
+                     tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_PARAM;
                      tvis.item.pszText = (LPWSTR)wKey.c_str();
                      tvis.item.cChildren = 1;
+                     tvis.item.lParam = (LPARAM)rootIdx; // 继承根键索引
                      TreeView_InsertItem(hTree, &tvis);
                  }
                  TreeView_Expand(hTree, hSelected, TVE_EXPAND);
              }
-        } else if (pkg->arg2 == 1) { // Values for List
+        } else if (pkg->arg2 == 2) { // Values for List (Updated from 1 to 2 to match module)
             ListView_DeleteAllItems(hList);
             int index = 0;
             while (std::getline(ss, line)) {
                 if (line.empty()) continue;
+                // 格式: V|值名|类型字符串|数据
                 size_t p1 = line.find('|');
                 size_t p2 = line.find('|', p1 + 1);
-                if (p1 != std::string::npos && p2 != std::string::npos) {
-                    std::wstring wName = Utils::StringHelper::UTF8ToWide(line.substr(0, p1));
-                    std::wstring wType = Utils::StringHelper::UTF8ToWide(line.substr(p1 + 1, p2 - p1 - 1));
-                    std::wstring wData = Utils::StringHelper::UTF8ToWide(line.substr(p2 + 1));
+                size_t p3 = line.find('|', p2 + 1);
+                if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
+                    std::wstring wName = Utils::StringHelper::UTF8ToWide(line.substr(p1 + 1, p2 - p1 - 1));
+                    std::wstring wType = Utils::StringHelper::UTF8ToWide(line.substr(p2 + 1, p3 - p2 - 1));
+                    std::wstring wData = Utils::StringHelper::UTF8ToWide(line.substr(p3 + 1));
 
                     LVITEMW lvi = { 0 };
-                    lvi.mask = LVIF_TEXT;
+                    lvi.mask = LVIF_TEXT | LVIF_PARAM;
                     lvi.iItem = index;
                     lvi.pszText = (LPWSTR)wName.c_str();
+                    lvi.lParam = index;
                     int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
                     
                     ListView_SetItemText(hList, idx, 1, (LPWSTR)wType.c_str());
@@ -644,6 +794,56 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                 }
             }
         }
+    }
+}
+
+void CommandHandler::HandleDriveList(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (client->hFileDlg && IsWindow(client->hFileDlg)) {
+        HWND hList = GetDlgItem(client->hFileDlg, IDC_LIST_FILE_REMOTE);
+        ListView_DeleteAllItems(hList);
+        SendMessage(hList, WM_SETREDRAW, FALSE, 0);
+
+        std::string data(pkg->data, pkg->arg1);
+        std::stringstream ss(data);
+        std::string line;
+        int index = 0;
+
+        while (std::getline(ss, line)) {
+            if (line.empty()) continue;
+            // Name|Type
+            size_t pos = line.find('|');
+            if (pos == std::string::npos) continue;
+            
+            std::string name = line.substr(0, pos);
+            std::string type = line.substr(pos + 1);
+            
+            std::wstring wName = Utils::StringHelper::UTF8ToWide(name);
+            std::wstring wType = Utils::StringHelper::UTF8ToWide(type);
+            
+            // Icon
+            SHFILEINFOW sfi = { 0 };
+            SHGetFileInfoW(wName.c_str(), 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
+            
+            LVITEMW lvi = { 0 };
+            lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
+            lvi.iItem = index;
+            lvi.pszText = (LPWSTR)wName.c_str();
+            lvi.iImage = sfi.iIcon;
+            lvi.lParam = index;
+            
+            int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+            ListView_SetItemText(hList, idx, 2, (LPWSTR)wType.c_str()); // Type column
+            
+            index++;
+        }
+        SendMessage(hList, WM_SETREDRAW, TRUE, 0);
     }
 }
 
@@ -682,19 +882,23 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
                 bool isDir = (typeStr == "[DIR]");
                 std::wstring wName = Formidable::Utils::StringHelper::UTF8ToWide(nameStr);
                 
+                // 获取正确的文件图标索引
+                SHFILEINFOW sfi = { 0 };
+                DWORD flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+                DWORD attr = isDir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+                SHGetFileInfoW(wName.c_str(), attr, &sfi, sizeof(sfi), flags);
+                
                 LVITEMW lvi = { 0 };
-                lvi.mask = LVIF_TEXT | LVIF_IMAGE;
+                lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
                 lvi.iItem = index;
                 lvi.pszText = (LPWSTR)wName.c_str();
-                
-                // 这里假设已经设置了 ImageList (FileDialog.cpp 中有初始化)
-                // 获取图标索引由外部逻辑处理或这里简单处理
-                lvi.iImage = isDir ? 1 : 0; 
+                lvi.lParam = index;
+                lvi.iImage = sfi.iIcon;
 
                 int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
                 
                 LVITEMW lviSet = { 0 };
-                // 大小列
+                // 大小列 (第1列)
                 std::wstring wSize;
                 if (isDir) {
                     wSize = L"<DIR>";
@@ -712,9 +916,14 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
                 lviSet.iSubItem = 1; lviSet.pszText = (LPWSTR)wSize.c_str();
                 SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
 
-                // 时间列
+                // 类型列 (第2列)
+                std::wstring wType = isDir ? L"文件夹" : L"文件";
+                lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)wType.c_str();
+                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
+
+                // 修改时间列 (第3列)
                 std::wstring wTime = Formidable::Utils::StringHelper::UTF8ToWide(timeStr);
-                lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)wTime.c_str();
+                lviSet.iSubItem = 3; lviSet.pszText = (LPWSTR)wTime.c_str();
                 SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
                 
                 index++;
@@ -742,6 +951,13 @@ void CommandHandler::HandleFileData(uint32_t clientId, const Formidable::Command
     if (client->hFileDownload != INVALID_HANDLE_VALUE) {
         DWORD dwWritten = 0;
         WriteFile(client->hFileDownload, pkg->data, pkg->arg1, &dwWritten, NULL);
+
+        // Update progress
+        client->currentDownloadSize += pkg->arg1;
+        if (client->totalDownloadSize > 0) {
+            int progress = (int)((client->currentDownloadSize * 100) / client->totalDownloadSize);
+            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, progress, 0);
+        }
     }
 }
 
@@ -758,6 +974,10 @@ void CommandHandler::HandleFileDownload(uint32_t clientId, const Formidable::Com
         if (client->hFileDownload != INVALID_HANDLE_VALUE) {
             CloseHandle(client->hFileDownload);
             client->hFileDownload = INVALID_HANDLE_VALUE;
+            
+            // Finish progress
+            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, 100, 0);
+            
             MessageBoxW(client->hFileDlg, L"文件下载完成", L"提示", MB_OK);
         }
     } else if (status == "Cannot open file for reading") {
@@ -773,14 +993,27 @@ void CommandHandler::HandleClipboard(uint32_t clientId, const Formidable::Comman
     std::string text(pkg->data, pkg->arg1);
     std::wstring wText = Utils::StringHelper::UTF8ToWide(text);
     
-    // 如果长度过长，截断显示
-    std::wstring showText = wText;
-    if (showText.length() > 2000) showText = showText.substr(0, 2000) + L"...";
-    
-    MessageBoxW(g_hMainWnd, showText.c_str(), L"远程剪贴板", MB_OK | MB_ICONINFORMATION);
+    if (OpenClipboard(g_hMainWnd)) {
+        EmptyClipboard();
+        size_t size = (wText.size() + 1) * sizeof(wchar_t);
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, size);
+        if (hMem) {
+            void* p = GlobalLock(hMem);
+            if (p) {
+                memcpy(p, wText.c_str(), size);
+                GlobalUnlock(hMem);
+                SetClipboardData(CF_UNICODETEXT, hMem);
+            } else {
+                GlobalFree(hMem);
+            }
+        }
+        CloseClipboard();
+        AddLog(L"剪贴板", L"已同步远程剪贴板内容到本地");
+    }
 }
 
 void CommandHandler::HandleScreenCapture(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    const UINT WM_APP_DESKTOP_FRAME = WM_APP + 220;
     std::shared_ptr<Formidable::ConnectedClient> client;
     {
         std::lock_guard<std::mutex> lock(g_ClientsMutex);
@@ -791,36 +1024,136 @@ void CommandHandler::HandleScreenCapture(uint32_t clientId, const Formidable::Co
     if (client->hDesktopDlg && IsWindow(client->hDesktopDlg)) {
         HWND hStatic = GetDlgItem(client->hDesktopDlg, IDC_STATIC_SCREEN);
         if (hStatic && pkg->arg1 > 0) {
-            HBITMAP hBitmap = NULL;
-            if (pkg->arg1 > 2 && pkg->data[0] == 'B' && pkg->data[1] == 'M') {
-                BITMAPFILEHEADER* pBmpFileHeader = (BITMAPFILEHEADER*)pkg->data;
-                BITMAPINFOHEADER* pBmpInfoHeader = (BITMAPINFOHEADER*)(pkg->data + sizeof(BITMAPFILEHEADER));
-                BYTE* pBits = (BYTE*)pkg->data + pBmpFileHeader->bfOffBits;
+            
+            // 解析协议
+            bool isDiff = (pkg->arg2 == 1);
+            int x = 0, y = 0, w = 0, h = 0;
+            BYTE* pData = (BYTE*)pkg->data;
+            DWORD dataLen = pkg->arg1;
+
+            if (isDiff) {
+                if (dataLen < 16) return;
+                memcpy(&x, pData, 4);
+                memcpy(&y, pData + 4, 4);
+                memcpy(&w, pData + 8, 4);
+                memcpy(&h, pData + 12, 4);
+                pData += 16;
+                dataLen -= 16;
+            }
+
+            // 解码图像数据
+            HBITMAP hFragment = NULL;
+            bool isBmp = (dataLen > 2 && pData[0] == 'B' && pData[1] == 'M');
+            if (isBmp) {
+                BITMAPFILEHEADER* pBmpFileHeader = (BITMAPFILEHEADER*)pData;
+                BITMAPINFOHEADER* pBmpInfoHeader = (BITMAPINFOHEADER*)(pData + sizeof(BITMAPFILEHEADER));
+                BYTE* pBits = (BYTE*)pData + pBmpFileHeader->bfOffBits;
                 HDC hdc = GetDC(hStatic);
-                hBitmap = CreateDIBitmap(hdc, pBmpInfoHeader, CBM_INIT, pBits, (BITMAPINFO*)pBmpInfoHeader, DIB_RGB_COLORS);
+                hFragment = CreateDIBitmap(hdc, pBmpInfoHeader, CBM_INIT, pBits, (BITMAPINFO*)pBmpInfoHeader, DIB_RGB_COLORS);
                 ReleaseDC(hStatic, hdc);
             } else {
-                HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, pkg->arg1);
-                LPVOID pBuf = GlobalLock(hGlobal);
-                memcpy(pBuf, pkg->data, pkg->arg1);
-                GlobalUnlock(hGlobal);
-                IStream* pStream = NULL;
-                if (CreateStreamOnHGlobal(hGlobal, TRUE, &pStream) == S_OK) {
-                    Bitmap* pBitmap = Bitmap::FromStream(pStream);
-                    if (pBitmap && pBitmap->GetLastStatus() == Ok) {
-                        pBitmap->GetHBITMAP(Color(0,0,0), &hBitmap);
-                        delete pBitmap;
+                HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, dataLen);
+                if (hGlobal) {
+                    LPVOID pBuf = GlobalLock(hGlobal);
+                    if (pBuf) {
+                        memcpy(pBuf, pData, dataLen);
+                        GlobalUnlock(hGlobal);
+                        IStream* pStream = NULL;
+                        if (CreateStreamOnHGlobal(hGlobal, TRUE, &pStream) == S_OK) {
+                            Bitmap* pBitmap = Bitmap::FromStream(pStream);
+                            if (pBitmap && pBitmap->GetLastStatus() == Ok) {
+                                pBitmap->GetHBITMAP(Color(0,0,0), &hFragment);
+                                delete pBitmap;
+                            }
+                            pStream->Release();
+                        }
                     }
-                    pStream->Release();
                 }
             }
 
-            if (hBitmap) {
-                HBITMAP hOldBmp = (HBITMAP)SendMessage(hStatic, STM_GETIMAGE, IMAGE_BITMAP, 0);
-                if (hOldBmp) DeleteObject(hOldBmp);
-                SendMessage(hStatic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBitmap);
-                InvalidateRect(hStatic, NULL, FALSE);
+            if (!hFragment) {
+                 if (s_screenLogState[clientId] != -1) {
+                    AddLog(L"桌面", L"画面解码失败");
+                    s_screenLogState[clientId] = -1;
+                }
+                return;
             }
+
+            // 获取 Fragment 尺寸
+            BITMAP bmFrag;
+            GetObject(hFragment, sizeof(BITMAP), &bmFrag);
+
+            // 如果是全量包，重置尺寸
+            if (!isDiff) {
+                w = bmFrag.bmWidth;
+                h = bmFrag.bmHeight;
+                x = 0;
+                y = 0;
+            }
+
+            // 检查/初始化 BackBuffer
+            HDC hScreenDC = GetDC(NULL);
+            bool needRecreate = false;
+
+            if (!client->hScreenBackBuffer) {
+                needRecreate = true;
+                if (isDiff) {
+                    // 只有 Diff 包但没有 BackBuffer，通常不应该发生（除非第一个包就是 Diff 且有 Bug）
+                    // 但为了容错，我们假设屏幕大小至少要容纳这个 Fragment
+                    // 或者更安全：直接把 Fragment 当作 BackBuffer (如果 (0,0))
+                    client->backBufferWidth = w + x;
+                    client->backBufferHeight = h + y;
+                } else {
+                    client->backBufferWidth = w;
+                    client->backBufferHeight = h;
+                }
+            } else if (!isDiff) {
+                 // 全量包，尺寸变了需要重建
+                 if (w != client->backBufferWidth || h != client->backBufferHeight) {
+                     needRecreate = true;
+                     client->backBufferWidth = w;
+                     client->backBufferHeight = h;
+                 }
+            }
+
+            if (needRecreate) {
+                if (client->hScreenBackBuffer) DeleteObject(client->hScreenBackBuffer);
+                if (client->hBackBufferDC) DeleteDC(client->hBackBufferDC);
+                
+                client->hScreenBackBuffer = CreateCompatibleBitmap(hScreenDC, client->backBufferWidth, client->backBufferHeight);
+                client->hBackBufferDC = CreateCompatibleDC(hScreenDC);
+                SelectObject(client->hBackBufferDC, client->hScreenBackBuffer);
+            }
+
+            // 绘制 Fragment 到 BackBuffer
+            HDC hFragDC = CreateCompatibleDC(hScreenDC);
+            HBITMAP hOld = (HBITMAP)SelectObject(hFragDC, hFragment);
+            
+            BitBlt(client->hBackBufferDC, x, y, bmFrag.bmWidth, bmFrag.bmHeight, hFragDC, 0, 0, SRCCOPY);
+            
+            SelectObject(hFragDC, hOld);
+            DeleteDC(hFragDC);
+            DeleteObject(hFragment);
+            
+            // 创建用于显示的副本
+            HBITMAP hDisplayBmp = CreateCompatibleBitmap(hScreenDC, client->backBufferWidth, client->backBufferHeight);
+            HDC hDisplayDC = CreateCompatibleDC(hScreenDC);
+            SelectObject(hDisplayDC, hDisplayBmp);
+            BitBlt(hDisplayDC, 0, 0, client->backBufferWidth, client->backBufferHeight, client->hBackBufferDC, 0, 0, SRCCOPY);
+            DeleteDC(hDisplayDC);
+            ReleaseDC(NULL, hScreenDC);
+
+            HBITMAP hOldBmp = (HBITMAP)SendMessage(hStatic, STM_GETIMAGE, IMAGE_BITMAP, 0);
+            if (hOldBmp) DeleteObject(hOldBmp);
+            SendMessage(hStatic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hDisplayBmp);
+            InvalidateRect(hStatic, NULL, FALSE);
+            
+            if (s_screenLogState[clientId] != 1) {
+                AddLog(L"桌面", isDiff ? L"更新局部画面" : L"更新全屏画面");
+                s_screenLogState[clientId] = 1;
+            }
+
+            PostMessageW(client->hDesktopDlg, WM_APP_DESKTOP_FRAME, (WPARAM)dataLen, (LPARAM)1);
         }
     }
 }

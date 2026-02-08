@@ -4,8 +4,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <commctrl.h>
 
 // 全局变量定义
@@ -35,11 +38,17 @@ HBRUSH g_hTermEditBkBrush = NULL;
 
 ServerSettings g_Settings;
 std::map<HWND, HBITMAP> g_WindowPreviews;
-std::map<HWND, ListViewSortInfo> g_SortInfo;
+std::map<HWND, Formidable::ListViewSortInfo> g_SortInfo;
+
+std::map<std::wstring, std::wstring> g_SavedRemarks;
+std::mutex g_SavedRemarksMutex;
+
+std::map<std::wstring, HistoryHost> g_HistoryHosts;
+std::mutex g_HistoryHostsMutex;
 
 // ListView排序回调函数
 int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort) {
-    ListViewSortInfo* psi = (ListViewSortInfo*)lParamSort;
+    Formidable::ListViewSortInfo* psi = (Formidable::ListViewSortInfo*)lParamSort;
     HWND hList = psi->hwndList;
     int col = psi->column;
     bool asc = psi->ascending;
@@ -47,21 +56,33 @@ int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSo
     wchar_t text1[512] = { 0 };
     wchar_t text2[512] = { 0 };
     
+    LVFINDINFOW fi1 = { 0 };
+    fi1.flags = LVFI_PARAM;
+    fi1.lParam = lParam1;
+    int idx1 = ListView_FindItem(hList, -1, &fi1);
+    if (idx1 < 0) idx1 = (int)lParam1;
+
+    LVFINDINFOW fi2 = { 0 };
+    fi2.flags = LVFI_PARAM;
+    fi2.lParam = lParam2;
+    int idx2 = ListView_FindItem(hList, -1, &fi2);
+    if (idx2 < 0) idx2 = (int)lParam2;
+
     LVITEMW lvi1 = { 0 };
     lvi1.mask = LVIF_TEXT;
-    lvi1.iItem = (int)lParam1;
+    lvi1.iItem = idx1;
     lvi1.iSubItem = col;
     lvi1.pszText = text1;
     lvi1.cchTextMax = 512;
-    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)lParam1, (LPARAM)&lvi1);
+    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)idx1, (LPARAM)&lvi1);
     
     LVITEMW lvi2 = { 0 };
     lvi2.mask = LVIF_TEXT;
-    lvi2.iItem = (int)lParam2;
+    lvi2.iItem = idx2;
     lvi2.iSubItem = col;
     lvi2.pszText = text2;
     lvi2.cchTextMax = 512;
-    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)lParam2, (LPARAM)&lvi2);
+    SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)idx2, (LPARAM)&lvi2);
     
     // 尝试数值比较
     wchar_t* end1 = nullptr;

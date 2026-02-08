@@ -5,6 +5,8 @@
 #include <iphlpapi.h>
 #include <shellapi.h>
 #include <wininet.h>
+#include <shlobj.h>
+#include <vfw.h>
 #include <sstream>
 #include <ctime>
 #include <vector>
@@ -13,6 +15,9 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(lib, "Wininet.lib")
+#pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "vfw32.lib")
 namespace Formidable {
     std::string WideToUTF8(const std::wstring& wstr) {
         if (wstr.empty()) return "";
@@ -167,6 +172,34 @@ namespace Formidable {
         return buf;
     }
     std::string GetLocalIP() {
+        ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
+        ULONG bufLen = 15000;
+        std::vector<unsigned char> buffer(bufLen);
+        IP_ADAPTER_ADDRESSES* addrs = (IP_ADAPTER_ADDRESSES*)buffer.data();
+        ULONG ret = GetAdaptersAddresses(AF_INET, flags, NULL, addrs, &bufLen);
+        if (ret == ERROR_BUFFER_OVERFLOW) {
+            buffer.resize(bufLen);
+            addrs = (IP_ADAPTER_ADDRESSES*)buffer.data();
+            ret = GetAdaptersAddresses(AF_INET, flags, NULL, addrs, &bufLen);
+        }
+        if (ret == NO_ERROR) {
+            for (IP_ADAPTER_ADDRESSES* p = addrs; p; p = p->Next) {
+                if (p->OperStatus != IfOperStatusUp) continue;
+                if (p->IfType == IF_TYPE_SOFTWARE_LOOPBACK) continue;
+                for (IP_ADAPTER_UNICAST_ADDRESS* ua = p->FirstUnicastAddress; ua; ua = ua->Next) {
+                    if (!ua->Address.lpSockaddr) continue;
+                    if (ua->Address.lpSockaddr->sa_family != AF_INET) continue;
+                    sockaddr_in* sin = (sockaddr_in*)ua->Address.lpSockaddr;
+                    char ip[INET_ADDRSTRLEN] = { 0 };
+                    inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
+                    std::string ipStr = ip;
+                    if (!ipStr.empty() && ipStr != "127.0.0.1" && ipStr.rfind("169.254.", 0) != 0) {
+                        return ipStr;
+                    }
+                }
+            }
+        }
+
         char host[256];
         if (gethostname(host, sizeof(host)) == SOCKET_ERROR) return "127.0.0.1";
         struct addrinfo hints = { 0 }, * res = NULL;
@@ -221,8 +254,6 @@ namespace Formidable {
         return location;
     }
 
-    typedef HRESULT(WINAPI* SetThreadDescriptionPtr)(HANDLE, PCWSTR);
-
     // 异常方式辅助函数，避免 C2712 错误 (SEH 与 C++ 析构对象冲突)
     static void SetThreadNameExceptionHelper(DWORD dwThreadID, const char* szName) {
         const DWORD MS_VC_EXCEPTION = 0x406D1388;
@@ -249,17 +280,7 @@ namespace Formidable {
     }
 
     void SetThreadName(HANDLE hThread, const std::wstring& name) {
-        // 1. 尝试使用现代 API (Windows 10 1607+)
-        HMODULE hKernel32 = GetModuleHandleA("kernel32.dll");
-        if (hKernel32) {
-            SetThreadDescriptionPtr pSetThreadDescription = (SetThreadDescriptionPtr)GetProcAddress(hKernel32, "SetThreadDescription");
-            if (pSetThreadDescription) {
-                pSetThreadDescription(hThread, name.c_str());
-                return;
-            }
-        }
-
-        // 2. 尝试使用异常方式 (旧版本 Windows，主要用于调试器)
+        // 使用异常方式设置线程名称 (兼容所有 Windows 版本)
         std::string nameAnsi = WideToUTF8(name);
         SetThreadNameExceptionHelper(GetThreadId(hThread), nameAnsi.c_str());
     }
@@ -590,4 +611,45 @@ namespace Formidable {
         }
         return false;
     }
+
+    // --- 硬件与软件检测 ---
+    bool CheckCameraExistence() {
+        char szDeviceName[80];
+        char szDeviceVersion[80];
+        for (int i = 0; i < 10; i++) {
+            if (capGetDriverDescriptionA(i, szDeviceName, sizeof(szDeviceName), szDeviceVersion, sizeof(szDeviceVersion))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool CheckTelegramInstalled() {
+        // Check Registry (Uninstall key)
+        HKEY hKey;
+        if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            char subKeyName[256];
+            DWORD subKeyLen = 256;
+            DWORD index = 0;
+            while (RegEnumKeyExA(hKey, index++, subKeyName, &subKeyLen, NULL, NULL, NULL, NULL) == ERROR_SUCCESS) {
+                if (strstr(subKeyName, "Telegram Desktop") != NULL) {
+                    RegCloseKey(hKey);
+                    return true;
+                }
+                subKeyLen = 256;
+            }
+            RegCloseKey(hKey);
+        }
+
+        // Check AppData path
+        char path[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, path))) {
+            std::string tPath = std::string(path) + "\\Telegram Desktop\\Telegram.exe";
+            if (GetFileAttributesA(tPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 }

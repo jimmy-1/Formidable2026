@@ -2,8 +2,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <commctrl.h>
 #include "NetworkManager.h"
 #include "../../thirdparty/Include/HPSocket/HPSocket.h"
@@ -230,7 +233,16 @@ void NetworkManager::OnConnect(CONNID connId, const char* lpszRemoteIP) {
     auto client = std::make_shared<ConnectedClient>();
     client->connId = connId;
     client->ip = lpszRemoteIP;
-    client->port = 0; // 我们无法从这里直接获取端口，但之后可以通过 GetClientAddress 获取
+    client->port = 0;
+    if (s_pServer) {
+        char addr[64] = { 0 };
+        int addrLen = (int)sizeof(addr);
+        USHORT port = 0;
+        if (s_pServer->GetClientAddress(connId, addr, addrLen, port)) {
+            client->ip = addr;
+            client->port = port;
+        }
+    }
     client->active = true;
     
     uint32_t clientId;

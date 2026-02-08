@@ -18,6 +18,26 @@ public:
         WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &result[0], len, nullptr, nullptr);
         return result;
     }
+
+    // 宽字符转ANSI
+    static std::string WideToANSI(const std::wstring& wstr) {
+        if (wstr.empty()) return "";
+        int len = WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (len <= 0) return "";
+        std::string result(len - 1, 0);
+        WideCharToMultiByte(CP_ACP, 0, wstr.c_str(), -1, &result[0], len, nullptr, nullptr);
+        return result;
+    }
+
+    // ANSI转宽字符
+    static std::wstring ANSIToWide(const std::string& str) {
+        if (str.empty()) return L"";
+        int len = MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, nullptr, 0);
+        if (len <= 0) return L"";
+        std::wstring result(len - 1, 0);
+        MultiByteToWideChar(CP_ACP, 0, str.c_str(), -1, &result[0], len);
+        return result;
+    }
     
     // UTF8转宽字符
     static std::wstring UTF8ToWide(const std::string& str) {

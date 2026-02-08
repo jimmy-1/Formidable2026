@@ -1,4 +1,4 @@
-# Formidable 2026 架构文档
+﻿# Formidable 2026 架构文档
 
 ## 目录
 - [系统架构概览](#系统架构概览)
@@ -283,6 +283,7 @@ HPSocket 接收数据
          ├─ HandleHeartbeat() → 更新 RTT 状态
          ├─ HandleProcessList() → 更新进程列表 UI
          ├─ HandleTerminalData() → 显示终端输出
+         ├─ HandleDriveList() → 获取磁盘列表
          ├─ HandleFileData() → 处理文件传输
          └─ ... (其他命令)
 ```

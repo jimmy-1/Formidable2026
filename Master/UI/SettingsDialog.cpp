@@ -1,7 +1,6 @@
 ﻿#include "SettingsDialog.h"
 #include "../GlobalState.h"
 #include "../Config.h"
-#include "../StringUtils.h"
 #include "../resource.h"
 
 INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -21,6 +20,22 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         CheckRadioButton(hDlg, IDC_RADIO_FRP_NO, IDC_RADIO_FRP_YES, 
                          g_Settings.bEnableFrp ? IDC_RADIO_FRP_YES : IDC_RADIO_FRP_NO);
 
+        // 桌面管理设置
+        HWND hComboCapture = GetDlgItem(hDlg, IDC_COMBO_CAPTURE_METHOD);
+        SendMessageW(hComboCapture, CB_ADDSTRING, 0, (LPARAM)L"GDI");
+        SendMessageW(hComboCapture, CB_ADDSTRING, 0, (LPARAM)L"DirectX");
+        SendMessageW(hComboCapture, CB_SETCURSEL, g_Settings.screenCaptureMethod, 0);
+
+        HWND hComboCompress = GetDlgItem(hDlg, IDC_COMBO_COMPRESS_METHOD);
+        SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"JPEG");
+        SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"PNG");
+        SendMessageW(hComboCompress, CB_SETCURSEL, g_Settings.imageCompressMethod, 0);
+
+        CheckRadioButton(hDlg, IDC_RADIO_MULTIMON_NO, IDC_RADIO_MULTIMON_YES, 
+                         g_Settings.enableMultiMonitor ? IDC_RADIO_MULTIMON_YES : IDC_RADIO_MULTIMON_NO);
+
+        CheckDlgButton(hDlg, IDC_CHECK_DIFF_TRANS, g_Settings.useDiffTransmission ? BST_CHECKED : BST_UNCHECKED);
+
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND:
@@ -35,6 +50,12 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             g_Settings.frpDownloadPort = GetDlgItemInt(hDlg, IDC_EDIT_DOWNLOAD_PORT, NULL, FALSE);
             GetDlgItemTextW(hDlg, IDC_EDIT_TOKEN, g_Settings.szFrpToken, 64);
             g_Settings.bEnableFrp = IsDlgButtonChecked(hDlg, IDC_RADIO_FRP_YES) == BST_CHECKED;
+
+            // 保存桌面管理设置
+            g_Settings.screenCaptureMethod = SendDlgItemMessage(hDlg, IDC_COMBO_CAPTURE_METHOD, CB_GETCURSEL, 0, 0);
+            g_Settings.imageCompressMethod = SendDlgItemMessage(hDlg, IDC_COMBO_COMPRESS_METHOD, CB_GETCURSEL, 0, 0);
+            g_Settings.enableMultiMonitor = IsDlgButtonChecked(hDlg, IDC_RADIO_MULTIMON_YES) == BST_CHECKED;
+            g_Settings.useDiffTransmission = IsDlgButtonChecked(hDlg, IDC_CHECK_DIFF_TRANS) == BST_CHECKED;
 
             SaveSettings();
             MessageBoxW(hDlg, L"设置已保存", L"提示", MB_OK | MB_ICONINFORMATION);

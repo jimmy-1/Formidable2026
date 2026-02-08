@@ -1,9 +1,12 @@
 ﻿#pragma once
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #include <basetsd.h>
 #include <mmsystem.h>
 #include <cstdint>
@@ -72,10 +75,18 @@ struct ConnectedClient {
     // 文件传输
     HANDLE hFileDownload; // 使用Win32 HANDLE以便于跨线程/复杂操作
     std::wstring downloadPath;
+    unsigned long long totalDownloadSize;
+    unsigned long long currentDownloadSize;
 
     // 音频播放 (Master端使用)
     HWAVEOUT hWaveOut;
     void* pAudioDecoder;  // FFmpeg AVCodecContext* 用于 MP3 解码
+
+    // 屏幕监控缓存
+    HBITMAP hScreenBackBuffer;
+    HDC hBackBufferDC;
+    int backBufferWidth;
+    int backBufferHeight;
 
     ConnectedClient() : clientId(0), connId(0), port(0), active(false), 
                         lastHeartbeat(0),
@@ -85,7 +96,10 @@ struct ConnectedClient {
                         hAudioDlg(NULL), hVideoDlg(NULL),
                         isMonitoring(false), info{}, listIndex(-1),
                         hFileDownload(INVALID_HANDLE_VALUE),
-                        hWaveOut(NULL), pAudioDecoder(NULL) {
+                        totalDownloadSize(0), currentDownloadSize(0),
+                        hWaveOut(NULL), pAudioDecoder(NULL),
+                        hScreenBackBuffer(NULL), hBackBufferDC(NULL),
+                        backBufferWidth(0), backBufferHeight(0) {
     }
 };
 

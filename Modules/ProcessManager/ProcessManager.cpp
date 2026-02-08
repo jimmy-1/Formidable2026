@@ -5,8 +5,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 #include <vector>
@@ -100,7 +103,7 @@ bool GetProcessOwner(HANDLE hProcess, std::string& owner) {
     return false;
 }
 
-void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
+void SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data, int len) {
     PkgHeader header;
     memcpy(header.flag, "FRMD26?", 7);
     header.originLen = sizeof(CommandPkg) - 1 + len;
@@ -111,7 +114,8 @@ void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     
     CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
     pkg->cmd = cmd;
-    pkg->arg1 = len;
+    pkg->arg1 = arg1;
+    pkg->arg2 = arg2;
     if (len > 0 && data) {
         memcpy(pkg->data, data, len);
     }
@@ -227,39 +231,39 @@ void ListProcesses(SOCKET s) {
     CloseHandle(hSnapshot);
     // EnableDebugPrivilege(FALSE); // Utils 没有提供关闭的接口，通常开启后不需要关闭
     
-    SendResponse(s, CMD_PROCESS_LIST, processes.data(), (int)(processes.size() * sizeof(ProcessInfo)));
+    SendResponse(s, CMD_PROCESS_LIST, (uint32_t)(processes.size() * sizeof(ProcessInfo)), 0, processes.data(), (int)(processes.size() * sizeof(ProcessInfo)));
 }
 
 void ListProcessModules(SOCKET s, uint32_t pid) {
-    EnableDebugPrivilege();
     std::vector<ModuleInfo> modules;
-    // 使用 TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32 以获取 64 位和 32 位模块
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
     if (hSnapshot == INVALID_HANDLE_VALUE) {
-        SendResponse(s, CMD_PROCESS_MODULES, NULL, 0);
-        return;
+        // 尝试只用 TH32CS_SNAPMODULE
+        hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+    }
+    
+    if (hSnapshot != INVALID_HANDLE_VALUE) {
+        MODULEENTRY32W me32;
+        me32.dwSize = sizeof(MODULEENTRY32W);
+        if (Module32FirstW(hSnapshot, &me32)) {
+            do {
+                ModuleInfo info = { 0 };
+                info.baseAddr = (uint64_t)me32.modBaseAddr;
+                info.size = me32.modBaseSize;
+
+                std::string utf8Name = WideToUTF8(me32.szModule);
+                std::string utf8Path = WideToUTF8(me32.szExePath);
+
+                strncpy(info.name, utf8Name.c_str(), sizeof(info.name) - 1);
+                strncpy(info.path, utf8Path.c_str(), sizeof(info.path) - 1);
+
+                modules.push_back(info);
+            } while (Module32NextW(hSnapshot, &me32));
+        }
+        CloseHandle(hSnapshot);
     }
 
-    MODULEENTRY32W me32;
-    me32.dwSize = sizeof(MODULEENTRY32W);
-    if (Module32FirstW(hSnapshot, &me32)) {
-        do {
-            ModuleInfo info = { 0 };
-            info.baseAddr = (uint64_t)me32.modBaseAddr;
-            info.size = me32.modBaseSize;
-
-            std::string utf8Name = WideToUTF8(me32.szModule);
-            std::string utf8Path = WideToUTF8(me32.szExePath);
-
-            strncpy(info.name, utf8Name.c_str(), sizeof(info.name) - 1);
-            strncpy(info.path, utf8Path.c_str(), sizeof(info.path) - 1);
-
-            modules.push_back(info);
-        } while (Module32NextW(hSnapshot, &me32));
-    }
-    CloseHandle(hSnapshot);
-
-    SendResponse(s, CMD_PROCESS_MODULES, modules.data(), (int)(modules.size() * sizeof(ModuleInfo)));
+    SendResponse(s, CMD_PROCESS_MODULES, (uint32_t)(modules.size() * sizeof(ModuleInfo)), pid, modules.data(), (int)(modules.size() * sizeof(ModuleInfo)));
 }
 
 // KillProcess 已在 Utils.h 中声明并在 Utils.cpp 中实现，此处不再重复定义
@@ -275,7 +279,7 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         // arg1 might be DLL size if loaded via MemoryModule, so use arg2 for PID
         bool ok = KillProcess(pkg->arg2);
         std::string msg = ok ? "进程已结束" : "结束进程失败";
-        SendResponse(s, CMD_PROCESS_KILL, msg.c_str(), (int)msg.size());
+        SendResponse(s, CMD_PROCESS_KILL, (uint32_t)msg.size(), pkg->arg2, msg.c_str(), (int)msg.size());
     }
 }
 

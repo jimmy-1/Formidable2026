@@ -12,17 +12,22 @@ EnHandleResult CServerListener::OnPrepareListen(ITcpServer* pSender, SOCKET soLi
 
 EnHandleResult CServerListener::OnAccept(ITcpServer* pSender, CONNID dwConnID, UINT_PTR soClient)
 {
-    wchar_t szAddress[50] = { 0 };
-    int iAddressLen = 50;
+    TCHAR szAddress[64] = { 0 };
+    int iAddressLen = 64;
     USHORT usPort = 0;
     
-    pSender->GetRemoteAddress(dwConnID, (TCHAR*)szAddress, iAddressLen, usPort);
-    
-    if (m_onConnect) {
-        // 转换wchar_t到char*供回调使用
-        char szAddressA[50] = { 0 };
-        WideCharToMultiByte(CP_ACP, 0, szAddress, -1, szAddressA, sizeof(szAddressA), NULL, NULL);
-        m_onConnect(dwConnID, szAddressA);
+    if (pSender->GetRemoteAddress(dwConnID, szAddress, iAddressLen, usPort)) {
+        if (m_onConnect) {
+#ifdef _UNICODE
+            // 转换wchar_t到char*供回调使用
+            char szAddressA[64] = { 0 };
+            WideCharToMultiByte(CP_UTF8, 0, szAddress, -1, szAddressA, sizeof(szAddressA), NULL, NULL);
+            m_onConnect(dwConnID, szAddressA);
+#else
+            // 直接使用char*
+            m_onConnect(dwConnID, szAddress);
+#endif
+        }
     }
     
     return HR_OK;

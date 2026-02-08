@@ -22,7 +22,7 @@ public:
     /// <summary>
     /// 显示远程桌面对话框
     /// </summary>
-    static HWND Show(HWND hParent, uint32_t clientId);
+    static HWND Show(HWND hParent, uint32_t clientId, bool isGrayscale = false);
 };
 
 } // namespace UI

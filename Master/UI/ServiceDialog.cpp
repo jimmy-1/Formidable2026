@@ -1,7 +1,6 @@
 ﻿#include "ServiceDialog.h"
 #include "../GlobalState.h"
 #include "../NetworkHelper.h"
-#include "../StringUtils.h"
 #include "../../Common/Config.h"
 #include "../resource.h"
 #include "../Utils/StringHelper.h"
@@ -24,11 +23,12 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
-        lvc.pszText = (LPWSTR)L"服务名"; lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"显示名"; lvc.cx = 250; SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"状态";     lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"启动类型"; lvc.cx = 80;  SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"文件路径"; lvc.cx = 300; SendMessageW(hList, LVM_INSERTCOLUMNW, 4, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"服务名";     lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"显示名";     lvc.cx = 200; SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"状态";       lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"启动类型";   lvc.cx = 80;  SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"服务类型";   lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 4, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"文件路径";   lvc.cx = 300; SendMessageW(hList, LVM_INSERTCOLUMNW, 5, (LPARAM)&lvc);
         
         // 初始化后自动刷新
         SendMessage(hDlg, WM_COMMAND, IDC_BTN_SERVICE_REFRESH, 0);
@@ -69,16 +69,6 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                     g_SortInfo[hList].ascending = true;
                 }
                 
-                int count = ListView_GetItemCount(hList);
-                for (int i = 0; i < count; i++) {
-                    LVITEMW lvi = { 0 };
-                    lvi.mask = LVIF_PARAM;
-                    lvi.iItem = i;
-                    ListView_GetItem(hList, &lvi);
-                    lvi.lParam = i;
-                    ListView_SetItem(hList, &lvi);
-                }
-                
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
             }
         }
@@ -106,8 +96,12 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 std::string name = Formidable::Utils::StringHelper::WideToUTF8(wName);
                 
                 Formidable::CommandPkg pkg = { 0 };
-                pkg.cmd = Formidable::CMD_SERVICE_LIST;
-                pkg.arg1 = action; // 1=start, 2=stop, 3=delete
+                if (action == 1) pkg.cmd = Formidable::CMD_SERVICE_START;
+                else if (action == 2) pkg.cmd = Formidable::CMD_SERVICE_STOP;
+                else if (action == 3) pkg.cmd = Formidable::CMD_SERVICE_DELETE;
+                else pkg.cmd = Formidable::CMD_SERVICE_LIST;
+                
+                pkg.arg1 = (uint32_t)name.size() + 1;
                 
                 size_t bodySize = sizeof(Formidable::CommandPkg) - 1 + name.size() + 1;
                 std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);

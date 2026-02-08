@@ -1,11 +1,14 @@
 ﻿#ifndef FORMIDABLE_UTILS_H
 #define FORMIDABLE_UTILS_H
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <windows.h>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -78,6 +81,9 @@ namespace Formidable {
     // 自动启动管理
     bool AddToStartup(const std::string& name, const std::string& path);
     bool RemoveFromStartup(const std::string& name);
+    // 硬件与软件检测
+    bool CheckCameraExistence();
+    bool CheckTelegramInstalled();
     // 用户活动检测
     class ActivityMonitor {
     public:

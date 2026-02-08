@@ -6,4 +6,11 @@
 void LoadSettings();
 void SaveSettings();
 
+// 备注持久化
+void LoadClientRemarks();
+void SaveClientRemarks();
+
+void LoadHistoryHosts();
+void SaveHistoryHosts();
+
 #endif // CONFIG_H

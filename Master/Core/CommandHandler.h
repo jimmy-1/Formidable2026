@@ -41,6 +41,7 @@ private:
     
     // 处理文件相关
     static void HandleFileList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleDriveList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileData(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileDownload(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     

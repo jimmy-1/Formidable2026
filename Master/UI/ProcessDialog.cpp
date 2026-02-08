@@ -1,4 +1,10 @@
-﻿// ProcessDialog.cpp - 进程管理对话框实现
+﻿#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+// ProcessDialog.cpp - 进程管理对话框实现
 #include "ProcessDialog.h"
 #include "ModuleDialog.h"
 #include "../../Common/ClientTypes.h"
@@ -6,6 +12,7 @@
 #include "../../Common/Config.h"
 #include "../NetworkHelper.h"
 #include "../Core/CommandHandler.h"
+#include "../Utils/StringHelper.h"
 #include <CommCtrl.h>
 #include <vector>
 #include <map>
@@ -16,6 +23,7 @@ extern std::map<uint32_t, std::shared_ptr<Formidable::ConnectedClient>> g_Client
 extern std::mutex g_ClientsMutex;
 extern HINSTANCE g_hInstance;
 extern std::map<HWND, Formidable::ListViewSortInfo> g_SortInfo;
+int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort);
 
 namespace Formidable {
 namespace UI {
@@ -65,13 +73,29 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 HMENU hMenu = CreatePopupMenu();
                 AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_REFRESH, L"刷新列表(&R)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_MODULES, L"查看模块(&M)");
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_MODULES, L"查看DLL(&D)");
                 AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_KILL, L"结束进程(&K)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_COPY_PATH, L"复制路径(&C)");
-                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_OPEN_DIR, L"打开目录(&O)");
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_OPEN_DIR, L"浏览目录(&O)");
                 TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
                 DestroyMenu(hMenu);
+            } else if (nm->code == LVN_COLUMNCLICK) {
+                LPNMLISTVIEW pnmlv = (LPNMLISTVIEW)lParam;
+                HWND hList = pnmlv->hdr.hwndFrom;
+
+                if (!g_SortInfo.count(hList)) {
+                    g_SortInfo[hList] = { pnmlv->iSubItem, true, hList };
+                }
+
+                if (g_SortInfo[hList].column == pnmlv->iSubItem) {
+                    g_SortInfo[hList].ascending = !g_SortInfo[hList].ascending;
+                } else {
+                    g_SortInfo[hList].column = pnmlv->iSubItem;
+                    g_SortInfo[hList].ascending = true;
+                }
+
+                ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
             }
         }
         break;
@@ -113,7 +137,8 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
 
                 Formidable::CommandPkg pkg = { 0 };
                 pkg.cmd = CMD_PROCESS_KILL;
-                pkg.arg1 = pid;
+                pkg.arg1 = 0;   // 某些模块加载逻辑会检查 arg1，此处 PID 统一放在 arg2
+                pkg.arg2 = pid; // 与被控端 ProcessManager.cpp 保持一致
                 
                 size_t bodySize = sizeof(Formidable::CommandPkg);
                 std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
@@ -138,7 +163,77 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 uint32_t pid = (uint32_t)lvi.lParam;
                 
                 uint32_t clientId = s_dlgToClientId[hDlg];
+                
+                // 发送命令让被控端加载模块（如果尚未加载）并获取模块列表
+                // 注意：这里需要确保被控端已经加载了 ProcessManager 模块
+                // 实际上 ListProcesses 能工作说明已经加载了，所以这里只需要发送命令
+                Formidable::CommandPkg pkg = { 0 };
+                pkg.cmd = CMD_PROCESS_MODULES;
+                pkg.arg1 = 0;
+                pkg.arg2 = pid; // PID 放在 arg2
+                
+                size_t bodySize = sizeof(Formidable::CommandPkg);
+                std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
+                Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
+                memcpy(h->flag, "FRMD26?", 7);
+                h->originLen = (int)bodySize;
+                h->totalLen = (int)sendBuf.size();
+                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, bodySize);
+                SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+
                 ShowModuleDialog(hDlg, clientId, pid);
+            }
+            break;
+        }
+        case IDM_PROCESS_COPY_PATH: {
+            HWND hList = GetDlgItem(hDlg, IDC_LIST_PROCESS);
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szPath[MAX_PATH];
+                ListView_GetItemText(hList, selected, 8, szPath, MAX_PATH);
+                
+                if (OpenClipboard(hDlg)) {
+                    EmptyClipboard();
+                    size_t len = (wcslen(szPath) + 1) * sizeof(wchar_t);
+                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                    if (hMem) {
+                        memcpy(GlobalLock(hMem), szPath, len);
+                        GlobalUnlock(hMem);
+                        SetClipboardData(CF_UNICODETEXT, hMem);
+                    }
+                    CloseClipboard();
+                }
+            }
+            break;
+        }
+        case IDM_PROCESS_OPEN_DIR: {
+            HWND hList = GetDlgItem(hDlg, IDC_LIST_PROCESS);
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szPath[MAX_PATH];
+                ListView_GetItemText(hList, selected, 8, szPath, MAX_PATH);
+                
+                // 使用 explorer.exe /select,"path" 在被控端定位文件
+                std::wstring wcmd = L"explorer.exe /select,\"" + std::wstring(szPath) + L"\"";
+                std::string cmd = Formidable::Utils::StringHelper::WideToUTF8(wcmd);
+
+                Formidable::CommandPkg pkg = { 0 };
+                pkg.cmd = CMD_SHELL_EXEC;
+                pkg.arg1 = (uint32_t)cmd.length();
+                
+                size_t headerSize = offsetof(Formidable::CommandPkg, data);
+                size_t bodySize = headerSize + cmd.length();
+                
+                std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
+                Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
+                memcpy(h->flag, "FRMD26?", 7);
+                h->originLen = (int)bodySize;
+                h->totalLen = (int)sendBuf.size();
+                
+                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, headerSize);
+                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + headerSize, cmd.c_str(), cmd.length());
+                
+                SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
             }
             break;
         }

@@ -15,12 +15,6 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
     case WM_INITDIALOG: {
         uint32_t clientId = (uint32_t)lParam;
         dlgToClientId[hDlg] = clientId;
-        // 清理可能存在的旧预览图
-        if (g_WindowPreviews.count(hDlg)) {
-            HBITMAP hOld = g_WindowPreviews[hDlg];
-            if (hOld) DeleteObject(hOld);
-            g_WindowPreviews.erase(hDlg);
-        }
         
         // 设置窗口图标
         SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_WINDOW)));
@@ -43,44 +37,9 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         GetClientRect(hDlg, &rc);
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
-
-        int listHeight = (height * 6) / 10;
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_WINDOW), 5, 5, width - 10, listHeight, TRUE);
         
-        int previewTop = listHeight + 10;
-        int previewHeight = height - previewTop - 5;
-        MoveWindow(GetDlgItem(hDlg, IDC_STATIC), 5, previewTop, width - 10, previewHeight, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_WIN_PREVIEW), 10, previewTop + 15, width - 20, previewHeight - 20, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_WINDOW), 5, 5, width - 10, height - 10, TRUE);
         return (INT_PTR)TRUE;
-    }
-    case WM_DRAWITEM: {
-        LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam;
-        if (lpDrawItem->CtlID == IDC_STATIC_WIN_PREVIEW) {
-            HBITMAP hBmp = NULL;
-            if (g_WindowPreviews.count(hDlg)) hBmp = g_WindowPreviews[hDlg];
-            
-            FillRect(lpDrawItem->hDC, &lpDrawItem->rcItem, (HBRUSH)GetStockObject(BLACK_BRUSH));
-            if (hBmp) {
-                HDC hMemDC = CreateCompatibleDC(lpDrawItem->hDC);
-                SelectObject(hMemDC, hBmp);
-                BITMAP bmp;
-                GetObject(hBmp, sizeof(BITMAP), &bmp);
-                
-                SetStretchBltMode(lpDrawItem->hDC, HALFTONE);
-                StretchBlt(lpDrawItem->hDC, lpDrawItem->rcItem.left, lpDrawItem->rcItem.top,
-                    lpDrawItem->rcItem.right - lpDrawItem->rcItem.left,
-                    lpDrawItem->rcItem.bottom - lpDrawItem->rcItem.top,
-                    hMemDC, 0, 0, bmp.bmWidth, bmp.bmHeight, SRCCOPY);
-                
-                DeleteDC(hMemDC);
-            } else {
-                SetTextColor(lpDrawItem->hDC, RGB(255, 255, 255));
-                SetBkMode(lpDrawItem->hDC, TRANSPARENT);
-                DrawTextW(lpDrawItem->hDC, L"正在获取预览图...", -1, &lpDrawItem->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            }
-            return (INT_PTR)TRUE;
-        }
-        break;
     }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
@@ -141,16 +100,6 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
                 } else {
                     g_SortInfo[hList].column = pnmlv->iSubItem;
                     g_SortInfo[hList].ascending = true;
-                }
-                
-                int count = ListView_GetItemCount(hList);
-                for (int i = 0; i < count; i++) {
-                    LVITEMW lvi = { 0 };
-                    lvi.mask = LVIF_PARAM;
-                    lvi.iItem = i;
-                    ListView_GetItem(hList, &lvi);
-                    lvi.lParam = i;
-                    ListView_SetItem(hList, &lvi);
                 }
                 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
