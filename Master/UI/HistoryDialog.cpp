@@ -119,6 +119,36 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
 
         return (INT_PTR)TRUE;
     }
+    case WM_SIZE: {
+        RECT rc;
+        GetClientRect(hDlg, &rc);
+        int width = rc.right - rc.left;
+        int height = rc.bottom - rc.top;
+
+        // 底部按钮区域高度
+        int btnAreaHeight = 40;
+        int btnY = height - 30;
+        int btnWidth = 90;
+        int btnHeight = 25;
+
+        // 调整按钮位置
+        HWND hClear = GetDlgItem(hDlg, IDC_BTN_CLEAR_HISTORY);
+        HWND hExport = GetDlgItem(hDlg, IDC_BTN_EXPORT_HISTORY);
+        HWND hClose = GetDlgItem(hDlg, IDCANCEL); 
+        // 尝试获取 IDOK 作为关闭按钮（如果是 IDOK）
+        if (!hClose || !IsWindow(hClose)) hClose = GetDlgItem(hDlg, IDOK);
+
+        if (hClear) MoveWindow(hClear, 10, btnY, btnWidth, btnHeight, TRUE);
+        if (hExport) MoveWindow(hExport, 15 + btnWidth, btnY, btnWidth, btnHeight, TRUE);
+        if (hClose) MoveWindow(hClose, width - 10 - btnWidth, btnY, btnWidth, btnHeight, TRUE);
+
+        // 调整列表控件大小
+        HWND hList = GetDlgItem(hDlg, IDC_LIST_HISTORY);
+        if (hList) {
+            MoveWindow(hList, 0, 0, width, height - btnAreaHeight, TRUE);
+        }
+        return (INT_PTR)TRUE;
+    }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
         if (nm && nm->idFrom == IDC_LIST_HISTORY) {
