@@ -15,7 +15,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Formidable2026", "Master\Fo
 		{9BE0B2B4-1CF4-4123-A38F-9746F6091934} = {9BE0B2B4-1CF4-4123-A38F-9746F6091934}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client", "Client\Client.vcxproj", "{3F756E52-23C2-4EE4-A184-37CF788D50A7}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client", "ClientSide\Client\Client.vcxproj", "{3F756E52-23C2-4EE4-A184-37CF788D50A7}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ModuleFileManager", "Modules\FileManager\ModuleFileManager.vcxproj", "{01904B3B-D9FF-4A7E-BC4D-A84E9C0D736C}"
 EndProject

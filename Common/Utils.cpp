@@ -652,4 +652,120 @@ namespace Formidable {
         return false;
     }
 
+    std::wstring ExpandPath(const std::wstring& path) {
+        wchar_t expanded[MAX_PATH];
+        ExpandEnvironmentStringsW(path.c_str(), expanded, MAX_PATH);
+        return expanded;
+    }
+
+    uint64_t Fnv1a64(const void* data, size_t len) {
+        const unsigned char* p = (const unsigned char*)data;
+        uint64_t hash = 1469598103934665603ULL;
+        for (size_t i = 0; i < len; ++i) {
+            hash ^= (uint64_t)p[i];
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+
+    uint64_t GetStableClientUniqueId(uint64_t configId) {
+        if (configId != 0) return configId;
+
+        std::wstring machineGuid;
+        HKEY hKey = NULL;
+        LONG rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0,
+            KEY_READ | KEY_WOW64_64KEY, &hKey);
+        if (rc != ERROR_SUCCESS) {
+            rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Cryptography", 0, KEY_READ, &hKey);
+        }
+        if (rc == ERROR_SUCCESS && hKey) {
+            wchar_t buf[256] = { 0 };
+            DWORD cb = sizeof(buf);
+            DWORD type = 0;
+            if (RegQueryValueExW(hKey, L"MachineGuid", NULL, &type, (LPBYTE)buf, &cb) == ERROR_SUCCESS && type == REG_SZ) {
+                machineGuid = buf;
+            }
+            RegCloseKey(hKey);
+        }
+
+        if (machineGuid.empty()) {
+            wchar_t comp[256] = { 0 };
+            DWORD csz = 256;
+            if (GetComputerNameW(comp, &csz)) machineGuid = comp;
+        }
+
+        std::string guidUtf8 = WideToUTF8(machineGuid);
+        uint64_t h = guidUtf8.empty() ? 0 : Fnv1a64(guidUtf8.data(), guidUtf8.size());
+        if (h == 0) {
+            uint64_t t = GetTickCount64();
+            h = Fnv1a64(&t, sizeof(t)) ^ ((uint64_t)GetCurrentProcessId() << 32) ^ (uint64_t)GetCurrentThreadId();
+            if (h == 0) h = 1;
+        }
+        return h;
+    }
+
+    bool IsUserSessionActive() {
+        #include <wtsapi32.h>
+        #pragma comment(lib, "wtsapi32.lib")
+        WTS_SESSION_INFOW* pSessions = NULL;
+        DWORD count = 0;
+        if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessions, &count)) {
+            for (DWORD i = 0; i < count; i++) {
+                if (pSessions[i].SessionId != 0 && pSessions[i].State == WTSActive) {
+                    LPWSTR ppBuffer = NULL;
+                    DWORD bytes = 0;
+                    bool hasUser = false;
+                    
+                    if (WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, pSessions[i].SessionId, WTSUserName, &ppBuffer, &bytes)) {
+                        if (ppBuffer && wcslen(ppBuffer) > 0) {
+                            hasUser = true;
+                        }
+                        WTSFreeMemory(ppBuffer);
+                    }
+
+                    if (hasUser) {
+                        WTSFreeMemory(pSessions);
+                        return true;
+                    }
+                }
+            }
+            WTSFreeMemory(pSessions);
+        }
+        return false;
+    }
+
+    std::string GetClipboardText() {
+        std::string result;
+        if (OpenClipboard(NULL)) {
+            HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+            if (hData) {
+                wchar_t* pText = (wchar_t*)GlobalLock(hData);
+                if (pText) {
+                    result = WideToUTF8(pText);
+                    GlobalUnlock(hData);
+                }
+            }
+            CloseClipboard();
+        }
+        return result;
+    }
+
+    void SetClipboardText(const std::string& text) {
+        if (OpenClipboard(NULL)) {
+            EmptyClipboard();
+            std::wstring wText = UTF8ToWide(text);
+            size_t size = (wText.size() + 1) * sizeof(wchar_t);
+            HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, size);
+            if (hGlobal) {
+                void* p = GlobalLock(hGlobal);
+                if (p) {
+                    memcpy(p, wText.c_str(), size);
+                    GlobalUnlock(hGlobal);
+                    SetClipboardData(CF_UNICODETEXT, hGlobal);
+                }
+            }
+            CloseClipboard();
+        }
+    }
+
 }

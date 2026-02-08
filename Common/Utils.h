@@ -84,6 +84,21 @@ namespace Formidable {
     // 硬件与软件检测
     bool CheckCameraExistence();
     bool CheckTelegramInstalled();
+
+    // 路径管理
+    std::wstring ExpandPath(const std::wstring& path);
+
+    // 唯一标识获取
+    uint64_t Fnv1a64(const void* data, size_t len);
+    uint64_t GetStableClientUniqueId(uint64_t configId = 0);
+
+    // 会话与系统管理
+    bool IsUserSessionActive();
+    
+    // 剪贴板管理
+    std::string GetClipboardText();
+    void SetClipboardText(const std::string& text);
+
     // 用户活动检测
     class ActivityMonitor {
     public:

@@ -12,9 +12,9 @@
 #include <string>
 #include <atomic>
 
-#include "../Common/Config.h"
-#include "../Common/Utils.h"
-#include "../Common/ClientCore.h"
+#include "../../Common/Config.h"
+#include "../../Common/Utils.h"
+#include "../../Common/ClientCore.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")

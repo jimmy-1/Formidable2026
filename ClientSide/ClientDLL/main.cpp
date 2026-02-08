@@ -1,4 +1,4 @@
-﻿#include "../Common/ClientCore.h"
+﻿#include "../../Common/ClientCore.h"
 #include <windows.h>
 #include <atomic>
 
