@@ -1,6 +1,5 @@
 ﻿#include "../Common/ClientCore.h"
 #include <windows.h>
-#include <thread>
 #include <atomic>
 
 using namespace Formidable;
