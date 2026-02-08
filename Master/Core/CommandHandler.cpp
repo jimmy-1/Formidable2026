@@ -725,11 +725,10 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
         HWND hTree = GetDlgItem(client->hRegistryDlg, IDC_TREE_REGISTRY);
         HWND hList = GetDlgItem(client->hRegistryDlg, IDC_LIST_REGISTRY_VALUES);
         
-        std::string data(pkg->data, pkg->arg1);
-        std::stringstream ss(data);
-        std::string line;
+        const char* pData = pkg->data;
+        int dataLen = pkg->arg1;
 
-        if (pkg->arg2 == 1) { // Keys for Tree (Updated from 0 to 1 to match module)
+        if (pkg->arg2 == 1) { // Keys for Tree
              HTREEITEM hSelected = TreeView_GetSelection(hTree);
              if (hSelected) {
                  // 删除旧子项
@@ -749,49 +748,94 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                      rootIdx = (uint32_t)tviParent.lParam;
                  }
 
-                 while (std::getline(ss, line)) {
-                     if (line.empty()) continue;
-                     // 格式: K|键名
-                     size_t pos = line.find('|');
-                     if (pos == std::string::npos) continue;
-                     std::string keyName = line.substr(pos + 1);
-                     std::wstring wKey = Utils::StringHelper::UTF8ToWide(keyName);
-                     TVINSERTSTRUCTW tvis = { 0 };
-                     tvis.hParent = hSelected;
-                     tvis.hInsertAfter = TVI_LAST;
-                     tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_PARAM;
-                     tvis.item.pszText = (LPWSTR)wKey.c_str();
-                     tvis.item.cChildren = 1;
-                     tvis.item.lParam = (LPARAM)rootIdx; // 继承根键索引
-                     TreeView_InsertItem(hTree, &tvis);
+                 // Binary Format Parsing: [Count:4] ([Len:4][Name])...
+                 if (dataLen >= 4) {
+                     uint32_t count = 0;
+                     memcpy(&count, pData, 4);
+                     const char* p = pData + 4;
+                     const char* end = pData + dataLen;
+
+                     SendMessage(hTree, WM_SETREDRAW, FALSE, 0);
+                     for (uint32_t i = 0; i < count && p < end; ++i) {
+                         if (p + 4 > end) break;
+                         uint32_t len = 0;
+                         memcpy(&len, p, 4); p += 4;
+                         if (p + len > end) break;
+                         std::string keyName(p, len); p += len;
+                         
+                         std::wstring wKey = Utils::StringHelper::UTF8ToWide(keyName);
+                         TVINSERTSTRUCTW tvis = { 0 };
+                         tvis.hParent = hSelected;
+                         tvis.hInsertAfter = TVI_LAST;
+                         tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_PARAM;
+                         tvis.item.pszText = (LPWSTR)wKey.c_str();
+                         tvis.item.cChildren = 1; // 假设有子项，支持展开
+                         tvis.item.lParam = (LPARAM)rootIdx; // 继承根键索引
+                         TreeView_InsertItem(hTree, &tvis);
+                     }
+                     SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
+                     TreeView_Expand(hTree, hSelected, TVE_EXPAND);
                  }
-                 TreeView_Expand(hTree, hSelected, TVE_EXPAND);
              }
-        } else if (pkg->arg2 == 2) { // Values for List (Updated from 1 to 2 to match module)
+        } else if (pkg->arg2 == 2) { // Values for List
             ListView_DeleteAllItems(hList);
-            int index = 0;
-            while (std::getline(ss, line)) {
-                if (line.empty()) continue;
-                // 格式: V|值名|类型字符串|数据
-                size_t p1 = line.find('|');
-                size_t p2 = line.find('|', p1 + 1);
-                size_t p3 = line.find('|', p2 + 1);
-                if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
-                    std::wstring wName = Utils::StringHelper::UTF8ToWide(line.substr(p1 + 1, p2 - p1 - 1));
-                    std::wstring wType = Utils::StringHelper::UTF8ToWide(line.substr(p2 + 1, p3 - p2 - 1));
-                    std::wstring wData = Utils::StringHelper::UTF8ToWide(line.substr(p3 + 1));
+            
+            // Binary Format Parsing: [Count:4] ([Type:4][NameLen:4][Name][DataLen:4][Data])...
+            if (dataLen >= 4) {
+                uint32_t count = 0;
+                memcpy(&count, pData, 4);
+                const char* p = pData + 4;
+                const char* end = pData + dataLen;
+                
+                SendMessage(hList, WM_SETREDRAW, FALSE, 0);
+                for (uint32_t i = 0; i < count && p < end; ++i) {
+                    if (p + 4 > end) break;
+                    uint32_t type = 0;
+                    memcpy(&type, p, 4); p += 4;
+
+                    if (p + 4 > end) break;
+                    uint32_t nameLen = 0;
+                    memcpy(&nameLen, p, 4); p += 4;
+                    if (p + nameLen > end) break;
+                    std::string name(p, nameLen); p += nameLen;
+
+                    if (p + 4 > end) break;
+                    uint32_t dataLen = 0;
+                    memcpy(&dataLen, p, 4); p += 4;
+                    if (p + dataLen > end) break;
+                    std::string data(p, dataLen); p += dataLen;
+
+                    std::wstring wName = Utils::StringHelper::UTF8ToWide(name);
+                    std::wstring wData = Utils::StringHelper::UTF8ToWide(data);
+                    
+                    // 类型映射
+                    std::wstring wType;
+                    switch (type) {
+                    case REG_SZ: wType = L"REG_SZ"; break;
+                    case REG_EXPAND_SZ: wType = L"REG_EXPAND_SZ"; break;
+                    case REG_BINARY: wType = L"REG_BINARY"; break;
+                    case REG_DWORD: wType = L"REG_DWORD"; break;
+                    case REG_DWORD_BIG_ENDIAN: wType = L"REG_DWORD_BIG_ENDIAN"; break;
+                    case REG_LINK: wType = L"REG_LINK"; break;
+                    case REG_MULTI_SZ: wType = L"REG_MULTI_SZ"; break;
+                    case REG_RESOURCE_LIST: wType = L"REG_RESOURCE_LIST"; break;
+                    case REG_FULL_RESOURCE_DESCRIPTOR: wType = L"REG_FULL_RESOURCE_DESCRIPTOR"; break;
+                    case REG_RESOURCE_REQUIREMENTS_LIST: wType = L"REG_RESOURCE_REQUIREMENTS_LIST"; break;
+                    case REG_QWORD: wType = L"REG_QWORD"; break;
+                    default: wType = L"Unknown"; break;
+                    }
 
                     LVITEMW lvi = { 0 };
                     lvi.mask = LVIF_TEXT | LVIF_PARAM;
-                    lvi.iItem = index;
+                    lvi.iItem = i;
                     lvi.pszText = (LPWSTR)wName.c_str();
-                    lvi.lParam = index;
+                    lvi.lParam = i;
                     int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
                     
                     ListView_SetItemText(hList, idx, 1, (LPWSTR)wType.c_str());
                     ListView_SetItemText(hList, idx, 2, (LPWSTR)wData.c_str());
-                    index++;
                 }
+                SendMessage(hList, WM_SETREDRAW, TRUE, 0);
             }
         }
     }

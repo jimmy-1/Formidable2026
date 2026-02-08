@@ -38,105 +38,184 @@ void SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const vo
 }
 
 std::string ListRegistryKeys(HKEY hRoot, const char* subKey) {
-    std::stringstream ss;
+    std::vector<char> buffer;
     HKEY hKey;
     std::wstring wSubKey = UTF8ToWide(subKey);
     if (RegOpenKeyExW(hRoot, wSubKey.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
-        return "";
+        uint32_t count = 0;
+        buffer.resize(4);
+        memcpy(buffer.data(), &count, 4);
+        return std::string(buffer.begin(), buffer.end());
     }
 
     wchar_t name[256];
     DWORD nameSize;
     DWORD index = 0;
     
-    // 枚举子项 (格式: K|键名)
+    std::vector<std::string> keys;
+    
+    // 枚举子项
     while (true) {
         nameSize = sizeof(name) / sizeof(wchar_t);
         if (RegEnumKeyExW(hKey, index, name, &nameSize, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
-        ss << "K|" << WideToUTF8(name) << "\n";
+        keys.push_back(WideToUTF8(name));
         index++;
     }
 
     RegCloseKey(hKey);
-    return ss.str();
+
+    // 序列化: [Count:4] ([Len:4][Name])...
+    uint32_t count = (uint32_t)keys.size();
+    size_t totalSize = 4;
+    for (const auto& k : keys) {
+        totalSize += 4 + k.size();
+    }
+    
+    buffer.resize(totalSize);
+    char* p = buffer.data();
+    
+    memcpy(p, &count, 4); p += 4;
+    for (const auto& k : keys) {
+        uint32_t len = (uint32_t)k.size();
+        memcpy(p, &len, 4); p += 4;
+        memcpy(p, k.c_str(), len); p += len;
+    }
+    
+    return std::string(buffer.begin(), buffer.end());
 }
 
 std::string ListRegistryValues(HKEY hRoot, const char* subKey) {
-    std::stringstream ss;
+    std::vector<char> buffer;
     HKEY hKey;
     std::wstring wSubKey = UTF8ToWide(subKey);
     if (RegOpenKeyExW(hRoot, wSubKey.c_str(), 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
-        return "";
+        uint32_t count = 0;
+        buffer.resize(4);
+        memcpy(buffer.data(), &count, 4);
+        return std::string(buffer.begin(), buffer.end());
     }
 
-    wchar_t name[256];
+    wchar_t name[16383]; // Max value name length
     DWORD nameSize;
     DWORD index = 0;
     
-    // 枚举值 (格式: V|值名|类型字符串|数据)
+    struct ValInfo {
+        std::string name;
+        uint32_t type;
+        std::string data;
+    };
+    std::vector<ValInfo> values;
+    
+    // 枚举值
     while (true) {
         nameSize = sizeof(name) / sizeof(wchar_t);
         DWORD type;
-        BYTE data[8192];
-        DWORD dataSize = sizeof(data);
-        if (RegEnumValueW(hKey, index, name, &nameSize, NULL, &type, data, &dataSize) != ERROR_SUCCESS) break;
+        // 动态获取数据大小
+        DWORD dataSize = 0;
+        LSTATUS status = RegEnumValueW(hKey, index, name, &nameSize, NULL, &type, NULL, &dataSize);
+        if (status != ERROR_SUCCESS && status != ERROR_MORE_DATA) break;
         
-        std::string typeStr;
-        std::string valData;
+        std::vector<BYTE> dataBuf(dataSize);
+        nameSize = sizeof(name) / sizeof(wchar_t); // Reset nameSize
+        if (RegEnumValueW(hKey, index, name, &nameSize, NULL, &type, dataBuf.data(), &dataSize) != ERROR_SUCCESS) {
+            index++;
+            continue;
+        }
+        
+        ValInfo val;
+        val.name = WideToUTF8(name);
+        val.type = type;
         
         switch (type) {
             case REG_SZ:
-                typeStr = "REG_SZ";
-                valData = WideToUTF8((wchar_t*)data);
-                break;
             case REG_EXPAND_SZ:
-                typeStr = "REG_EXPAND_SZ";
-                valData = WideToUTF8((wchar_t*)data);
-                break;
-            case REG_DWORD:
-                typeStr = "REG_DWORD";
-                {
-                    char buf[32];
-                    sprintf_s(buf, "0x%08X", *(DWORD*)data);
-                    valData = buf;
+                if (dataSize > 0) {
+                    // 确保以 null 结尾
+                    if (dataSize >= 2 && dataBuf[dataSize-2] == 0 && dataBuf[dataSize-1] == 0) {
+                        val.data = WideToUTF8((wchar_t*)dataBuf.data());
+                    } else {
+                         // 有些畸形数据可能没有null结尾
+                         std::wstring ws((wchar_t*)dataBuf.data(), dataSize / 2);
+                         val.data = WideToUTF8(ws.c_str());
+                    }
                 }
                 break;
+            case REG_DWORD:
             case REG_DWORD_BIG_ENDIAN:
-                typeStr = "REG_DWORD_BIG_ENDIAN";
-                valData = WideToUTF8(L"(DWORD_BIG_ENDIAN)");
-                break;
-            case REG_MULTI_SZ:
-                typeStr = "REG_MULTI_SZ";
-                valData = WideToUTF8(L"(多字符串)");
-                break;
-            case REG_BINARY:
-                typeStr = "REG_BINARY";
-                {
-                    char buf[16];
-                    sprintf_s(buf, "(%u 字节)", dataSize);
-                    valData = buf;
+                if (dataSize >= 4) {
+                    char buf[32];
+                    sprintf_s(buf, "0x%08X (%u)", *(DWORD*)dataBuf.data(), *(DWORD*)dataBuf.data());
+                    val.data = buf;
                 }
                 break;
             case REG_QWORD:
-                typeStr = "REG_QWORD";
-                {
-                    char buf[32];
-                    sprintf_s(buf, "0x%016llX", *(unsigned long long*)data);
-                    valData = buf;
+                if (dataSize >= 8) {
+                    char buf[64];
+                    sprintf_s(buf, "0x%016llX", *(unsigned long long*)dataBuf.data());
+                    val.data = buf;
                 }
                 break;
+            case REG_MULTI_SZ:
+                // 处理多字符串
+                if (dataSize > 0) {
+                    std::wstring ws;
+                    wchar_t* p = (wchar_t*)dataBuf.data();
+                    wchar_t* end = (wchar_t*)(dataBuf.data() + dataSize);
+                    while (p < end && *p) {
+                        if (!ws.empty()) ws += L" ";
+                        ws += p;
+                        p += wcslen(p) + 1;
+                    }
+                    val.data = WideToUTF8(ws.c_str());
+                }
+                break;
+            case REG_BINARY:
             default:
-                typeStr = "未知类型";
-                valData = WideToUTF8(L"(未知数据)");
+                // 二进制数据转 hex 字符串 (前 256 字节)
+                {
+                    std::stringstream ss;
+                    DWORD showLen = dataSize > 256 ? 256 : dataSize;
+                    for (DWORD i = 0; i < showLen; ++i) {
+                        char hex[4];
+                        sprintf_s(hex, "%02X ", dataBuf[i]);
+                        ss << hex;
+                    }
+                    if (dataSize > 256) ss << "...";
+                    val.data = ss.str();
+                }
                 break;
         }
         
-        ss << "V|" << WideToUTF8(name) << "|" << typeStr << "|" << valData << "\n";
+        values.push_back(val);
         index++;
     }
 
     RegCloseKey(hKey);
-    return ss.str();
+
+    // 序列化: [Count:4] ([Type:4][NameLen:4][Name][DataLen:4][Data])...
+    uint32_t count = (uint32_t)values.size();
+    size_t totalSize = 4;
+    for (const auto& v : values) {
+        totalSize += 4 + 4 + v.name.size() + 4 + v.data.size();
+    }
+    
+    buffer.resize(totalSize);
+    char* p = buffer.data();
+    
+    memcpy(p, &count, 4); p += 4;
+    for (const auto& v : values) {
+        memcpy(p, &v.type, 4); p += 4;
+        
+        uint32_t nameLen = (uint32_t)v.name.size();
+        memcpy(p, &nameLen, 4); p += 4;
+        memcpy(p, v.name.c_str(), nameLen); p += nameLen;
+        
+        uint32_t dataLen = (uint32_t)v.data.size();
+        memcpy(p, &dataLen, 4); p += 4;
+        memcpy(p, v.data.c_str(), dataLen); p += dataLen;
+    }
+    
+    return std::string(buffer.begin(), buffer.end());
 }
 
 // 删除键

