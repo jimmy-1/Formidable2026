@@ -84,15 +84,15 @@ static void SendFileTask(HWND hDlg, uint32_t clientId, std::wstring localPath, s
     if (file.is_open()) {
         // 获取文件大小
         file.seekg(0, std::ios::end);
-        size_t totalSize = file.tellg();
+        int64_t totalSize = (int64_t)file.tellg();
         file.seekg(0, std::ios::beg);
-        size_t totalSent = 0;
+        int64_t totalSent = 0;
 
         char buf[16384]; // 16KB 块
         while (file.read(buf, sizeof(buf)) || (file.gcount() > 0)) {
             SendRemoteCommand(clientId, CMD_FILE_DATA, (uint32_t)file.gcount(), 0, buf, (size_t)file.gcount());
             
-            totalSent += file.gcount();
+            totalSent += (int64_t)file.gcount();
             if (totalSize > 0) {
                 int progress = (int)((totalSent * 100) / totalSize);
                 PostMessageW(hDlg, WM_UPDATE_PROGRESS, progress, 0);

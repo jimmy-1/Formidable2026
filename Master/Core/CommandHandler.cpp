@@ -1173,7 +1173,14 @@ void CommandHandler::HandleScreenCapture(uint32_t clientId, const Formidable::Co
             HDC hFragDC = CreateCompatibleDC(hScreenDC);
             HBITMAP hOld = (HBITMAP)SelectObject(hFragDC, hFragment);
             
-            BitBlt(client->hBackBufferDC, x, y, bmFrag.bmWidth, bmFrag.bmHeight, hFragDC, 0, 0, SRCCOPY);
+            // 修复 RAW 模式下画面倒置的问题
+            // 如果是 BMP (RAW)，由于 DIB 的存储顺序可能导致倒置，这里强制垂直翻转绘制
+            if (isBmp) {
+                StretchBlt(client->hBackBufferDC, x, y, bmFrag.bmWidth, bmFrag.bmHeight, 
+                           hFragDC, 0, bmFrag.bmHeight - 1, bmFrag.bmWidth, -bmFrag.bmHeight, SRCCOPY);
+            } else {
+                BitBlt(client->hBackBufferDC, x, y, bmFrag.bmWidth, bmFrag.bmHeight, hFragDC, 0, 0, SRCCOPY);
+            }
             
             SelectObject(hFragDC, hOld);
             DeleteDC(hFragDC);

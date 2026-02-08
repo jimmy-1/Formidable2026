@@ -166,10 +166,13 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN:
         case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
         case WM_RBUTTONDOWN:
         case WM_RBUTTONUP:
+        case WM_RBUTTONDBLCLK:
         case WM_MBUTTONDOWN:
         case WM_MBUTTONUP:
+        case WM_MBUTTONDBLCLK:
         case WM_MOUSEWHEEL: {
             Formidable::RemoteMouseEvent ev = { 0 };
             ev.msg = message;
@@ -208,8 +211,14 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             }
 
             if (message == WM_MOUSEWHEEL) ev.data = (short)HIWORD(wParam);
+
+            // Map double clicks to down events for compatibility with SendInput
+            if (message == WM_LBUTTONDBLCLK) ev.msg = WM_LBUTTONDOWN;
+            else if (message == WM_RBUTTONDBLCLK) ev.msg = WM_RBUTTONDOWN;
+            else if (message == WM_MBUTTONDBLCLK) ev.msg = WM_MBUTTONDOWN;
+
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
-            break;
+            return 0; // 阻止默认处理，避免出现本地右键菜单等问题
         }
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
@@ -219,7 +228,7 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
              ev.msg = message;
              ev.vk = (uint32_t)wParam;
              SendRemoteControl(Formidable::CMD_KEY_EVENT, &ev, sizeof(Formidable::RemoteKeyEvent));
-             break;
+             return 0;
         }
         }
     }
