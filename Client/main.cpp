@@ -162,11 +162,13 @@ void InstallClient() {
             L"<LogonTrigger>"
             L"<Enabled>true</Enabled>"
             L"</LogonTrigger>"
+            L"<BootTrigger>"
+            L"<Enabled>true</Enabled>"
+            L"</BootTrigger>"
             L"</Triggers>"
             L"<Principals>"
             L"<Principal id=\"Author\">"
-            L"<UserId>S-1-5-32-544</UserId>"
-            L"<LogonType>InteractiveToken</LogonType>"
+            L"<UserId>S-1-5-18</UserId>" // SYSTEM 账户，确保无登录也能运行
             L"<RunLevel>HighestAvailable</RunLevel>"
             L"</Principal>"
             L"</Principals>"
@@ -175,10 +177,10 @@ void InstallClient() {
             L"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"
             L"<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"
             L"<AllowHardTerminate>true</AllowHardTerminate>"
-            L"<StartWhenAvailable>false</StartWhenAvailable>"
+            L"<StartWhenAvailable>true</StartWhenAvailable>"
             L"<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>"
             L"<IdleSettings>"
-            L"<StopOnIdleEnd>true</StopOnIdleEnd>"
+            L"<StopOnIdleEnd>false</StopOnIdleEnd>"
             L"<RestartOnIdle>false</RestartOnIdle>"
             L"</IdleSettings>"
             L"<AllowStartOnDemand>true</AllowStartOnDemand>"
@@ -186,8 +188,12 @@ void InstallClient() {
             L"<Hidden>false</Hidden>"
             L"<RunOnlyIfIdle>false</RunOnlyIfIdle>"
             L"<WakeToRun>false</WakeToRun>"
-            L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"
+            L"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" // 无限运行时间
             L"<Priority>7</Priority>"
+            L"<RestartOnFailure>"
+            L"<Interval>PT1M</Interval>" // 失败后1分钟重启
+            L"<Count>999</Count>"
+            L"</RestartOnFailure>"
             L"</Settings>"
             L"<Actions Context=\"Author\">"
             L"<Exec>"
@@ -207,7 +213,8 @@ void InstallClient() {
             CloseHandle(hFile);
             
             wchar_t szCmd[MAX_PATH * 2];
-            swprintf_s(szCmd, MAX_PATH * 2, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f", szTempXml);
+            // 使用 SYSTEM 权限创建任务
+            swprintf_s(szCmd, MAX_PATH * 2, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f /ru SYSTEM", szTempXml);
             _wsystem(szCmd);
             DeleteFileW(szTempXml);
         }
@@ -222,9 +229,56 @@ void InstallClient() {
                 SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
                 SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
                 szPath, NULL, NULL, NULL, NULL, NULL);
+            
             if (hService) {
+                // 设置服务失败重启操作
+                SERVICE_FAILURE_ACTIONS fa = { 0 };
+                SC_ACTION actions[3];
+                actions[0].Type = SC_ACTION_RESTART;
+                actions[0].Delay = 60000; // 60秒后重启
+                actions[1].Type = SC_ACTION_RESTART;
+                actions[1].Delay = 60000;
+                actions[2].Type = SC_ACTION_RESTART;
+                actions[2].Delay = 60000;
+                
+                fa.dwResetPeriod = 86400; // 1天后重置失败计数
+                fa.lpRebootMsg = NULL;
+                fa.lpCommand = NULL;
+                fa.cActions = 3;
+                fa.lpsaActions = actions;
+                
+                ChangeServiceConfig2W(hService, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
+
                 StartServiceW(hService, 0, NULL);
                 CloseServiceHandle(hService);
+            } else {
+                // 服务可能已存在，尝试打开并更新配置
+                hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
+                if (hService) {
+                    SERVICE_FAILURE_ACTIONS fa = { 0 };
+                    SC_ACTION actions[3];
+                    actions[0].Type = SC_ACTION_RESTART;
+                    actions[0].Delay = 60000;
+                    actions[1].Type = SC_ACTION_RESTART;
+                    actions[1].Delay = 60000;
+                    actions[2].Type = SC_ACTION_RESTART;
+                    actions[2].Delay = 60000;
+                    
+                    fa.dwResetPeriod = 86400;
+                    fa.lpRebootMsg = NULL;
+                    fa.lpCommand = NULL;
+                    fa.cActions = 3;
+                    fa.lpsaActions = actions;
+                    
+                    ChangeServiceConfig2W(hService, SERVICE_CONFIG_FAILURE_ACTIONS, &fa);
+                    
+                    // 确保服务已启动
+                    SERVICE_STATUS status;
+                    if (QueryServiceStatus(hService, &status) && status.dwCurrentState != SERVICE_RUNNING) {
+                        StartServiceW(hService, 0, NULL);
+                    }
+                    CloseServiceHandle(hService);
+                }
             }
             CloseServiceHandle(hSCM);
         }

