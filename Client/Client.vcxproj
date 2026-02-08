@@ -141,6 +141,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\Common\ClientCore.cpp" />
     <ClCompile Include="..\Common\MemoryModule.cpp" />
     <ClCompile Include="..\Common\Utils.cpp" />
   </ItemGroup>
