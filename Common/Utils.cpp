@@ -10,6 +10,7 @@
 #include <sstream>
 #include <ctime>
 #include <vector>
+#include <wtsapi32.h>
 #pragma comment(lib, "Version.lib")
 #pragma comment(lib, "Iphlpapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
@@ -18,6 +19,7 @@
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "vfw32.lib")
+#pragma comment(lib, "wtsapi32.lib")
 namespace Formidable {
     std::string WideToUTF8(const std::wstring& wstr) {
         if (wstr.empty()) return "";
@@ -705,8 +707,6 @@ namespace Formidable {
     }
 
     bool IsUserSessionActive() {
-        #include <wtsapi32.h>
-        #pragma comment(lib, "wtsapi32.lib")
         WTS_SESSION_INFOW* pSessions = NULL;
         DWORD count = 0;
         if (WTSEnumerateSessionsW(WTS_CURRENT_SERVER_HANDLE, 0, 1, &pSessions, &count)) {
