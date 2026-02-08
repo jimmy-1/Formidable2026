@@ -39,21 +39,61 @@ struct DesktopState {
     int retryCount = 0;
     bool hasFrame = false;
     bool isRecording = false;
+
+    // 远程屏幕信息 (用于滚动和坐标计算)
+    int remoteWidth = 0;
+    int remoteHeight = 0;
+    int scrollX = 0;
+    int scrollY = 0;
 };
 
 static std::map<HWND, DesktopState> s_desktopStates;
 static const UINT WM_APP_DESKTOP_FRAME = WM_APP + 220;
+static const UINT WM_APP_UPDATE_SCROLLBARS = WM_APP + 221;
 static const UINT_PTR TIMER_DESKTOP_FIRST_FRAME = 0xD260;
+
+// 辅助函数：更新滚动条
+static void UpdateScrollBars(HWND hDlg, DesktopState& state, int clientW, int clientH) {
+    if (state.isStretched) {
+        ShowScrollBar(hDlg, SB_BOTH, FALSE);
+        return;
+    }
+
+    // 水平滚动条
+    SCROLLINFO si = { 0 };
+    si.cbSize = sizeof(SCROLLINFO);
+    si.fMask = SIF_ALL;
+    si.nMin = 0;
+    si.nMax = state.remoteWidth;
+    si.nPage = clientW;
+    si.nPos = state.scrollX;
+    SetScrollInfo(hDlg, SB_HORZ, &si, TRUE);
+
+    // 垂直滚动条
+    si.nMax = state.remoteHeight;
+    si.nPage = clientH;
+    si.nPos = state.scrollY;
+    SetScrollInfo(hDlg, SB_VERT, &si, TRUE);
+
+    ShowScrollBar(hDlg, SB_BOTH, TRUE);
+}
 
 // 远程桌面子类化过程
 LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
     uint32_t cid = (uint32_t)uIdSubclass; 
+    HWND hDlg = (HWND)dwRefData; // 父窗口句柄
     
     std::shared_ptr<Formidable::ConnectedClient> client;
     {
         std::lock_guard<std::mutex> lock(g_ClientsMutex);
         if (g_Clients.count(cid)) client = g_Clients[cid];
     }
+
+    // 获取状态引用 (注意：需确保 s_desktopStates 中存在该 hDlg)
+    if (s_desktopStates.find(hDlg) == s_desktopStates.end()) {
+        return DefSubclassProc(hWnd, message, wParam, lParam);
+    }
+    DesktopState& state = s_desktopStates[hDlg];
 
     if (message == WM_PAINT) {
         PAINTSTRUCT ps;
@@ -68,10 +108,33 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             
             BITMAP bmp;
             GetObject(hBmp, sizeof(BITMAP), &bmp);
+
+            // 检查远程分辨率是否变化
+            if (bmp.bmWidth != state.remoteWidth || bmp.bmHeight != state.remoteHeight) {
+                state.remoteWidth = bmp.bmWidth;
+                state.remoteHeight = bmp.bmHeight;
+                PostMessage(hDlg, WM_APP_UPDATE_SCROLLBARS, 0, 0);
+            }
             
-            // 强制拉伸显示
-            SetStretchBltMode(hdc, COLORONCOLOR);
-            StretchBlt(hdc, 0, 0, rc.right, rc.bottom, hMemDC, 0, 0, bmp.bmWidth, bmp.bmHeight, SRCCOPY);
+            if (state.isStretched) {
+                // 强制拉伸显示
+                SetStretchBltMode(hdc, HALFTONE); // 使用 HALFTONE 提高缩放质量
+                SetBrushOrgEx(hdc, 0, 0, NULL);
+                StretchBlt(hdc, 0, 0, rc.right, rc.bottom, hMemDC, 0, 0, bmp.bmWidth, bmp.bmHeight, SRCCOPY);
+            } else {
+                // 原始大小显示 (带滚动)
+                BitBlt(hdc, 0, 0, rc.right, rc.bottom, hMemDC, state.scrollX, state.scrollY, SRCCOPY);
+                
+                // 如果图片小于窗口，填充背景
+                if (bmp.bmWidth < rc.right) {
+                    RECT bg = { bmp.bmWidth, 0, rc.right, rc.bottom };
+                    FillRect(hdc, &bg, (HBRUSH)GetStockObject(BLACK_BRUSH));
+                }
+                if (bmp.bmHeight < rc.bottom) {
+                    RECT bg = { 0, bmp.bmHeight, rc.right, rc.bottom };
+                    FillRect(hdc, &bg, (HBRUSH)GetStockObject(BLACK_BRUSH));
+                }
+            }
             
             SelectObject(hMemDC, hOldBmp);
             DeleteDC(hMemDC);
@@ -112,11 +175,38 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             ev.msg = message;
             RECT rc;
             GetClientRect(hWnd, &rc);
-            // 归一化坐标 0-65535
-            if (rc.right > 0 && rc.bottom > 0) {
-                ev.x = (int32_t)LOWORD(lParam) * 65535 / rc.right;
-                ev.y = (int32_t)HIWORD(lParam) * 65535 / rc.bottom;
+            
+            // 计算远程坐标
+            int remoteX = 0, remoteY = 0;
+            int clientX = (int)(short)LOWORD(lParam);
+            int clientY = (int)(short)HIWORD(lParam);
+
+            if (state.isStretched) {
+                if (rc.right > 0 && rc.bottom > 0 && state.remoteWidth > 0 && state.remoteHeight > 0) {
+                    // 拉伸模式：按比例映射
+                    remoteX = clientX * state.remoteWidth / rc.right;
+                    remoteY = clientY * state.remoteHeight / rc.bottom;
+                }
+            } else {
+                // 原始模式：加上滚动偏移
+                remoteX = clientX + state.scrollX;
+                remoteY = clientY + state.scrollY;
             }
+
+            // 归一化坐标 0-65535 (Formidable 协议要求)
+            // 注意：SimpleRemoter 使用绝对坐标或归一化坐标取决于实现。
+            // 这里我们保持 Formidable 原有的归一化逻辑，但使用正确的 remoteWidth/Height 作为基准
+            if (state.remoteWidth > 0 && state.remoteHeight > 0) {
+                ev.x = remoteX * 65535 / state.remoteWidth;
+                ev.y = remoteY * 65535 / state.remoteHeight;
+            } else {
+                // 兜底：如果还没收到画面，可能无法正确计算，暂且用窗口比例
+                if (rc.right > 0 && rc.bottom > 0) {
+                    ev.x = clientX * 65535 / rc.right;
+                    ev.y = clientY * 65535 / rc.bottom;
+                }
+            }
+
             if (message == WM_MOUSEWHEEL) ev.data = (short)HIWORD(wParam);
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
             break;
@@ -270,6 +360,81 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             RECT rc;
             GetClientRect(hDlg, &rc);
             MoveWindow(hStatic, 0, 0, rc.right, rc.bottom, TRUE);
+
+            if (s_desktopStates.count(hDlg)) {
+                DesktopState& state = s_desktopStates[hDlg];
+                UpdateScrollBars(hDlg, state, rc.right, rc.bottom);
+            }
+        }
+        return (INT_PTR)TRUE;
+    }
+    case WM_APP_UPDATE_SCROLLBARS: {
+        if (s_desktopStates.count(hDlg)) {
+            DesktopState& state = s_desktopStates[hDlg];
+            RECT rc;
+            GetClientRect(hDlg, &rc);
+            UpdateScrollBars(hDlg, state, rc.right, rc.bottom);
+            // 触发重绘
+            HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+            if (hStatic) InvalidateRect(hStatic, NULL, FALSE);
+        }
+        return (INT_PTR)TRUE;
+    }
+    case WM_HSCROLL: {
+        if (s_desktopStates.count(hDlg)) {
+            DesktopState& state = s_desktopStates[hDlg];
+            SCROLLINFO si = { 0 };
+            si.cbSize = sizeof(SCROLLINFO);
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hDlg, SB_HORZ, &si);
+            
+            int newPos = si.nPos;
+            switch (LOWORD(wParam)) {
+            case SB_LINELEFT: newPos -= 10; break;
+            case SB_LINERIGHT: newPos += 10; break;
+            case SB_PAGELEFT: newPos -= si.nPage; break;
+            case SB_PAGERIGHT: newPos += si.nPage; break;
+            case SB_THUMBTRACK: newPos = si.nTrackPos; break;
+            }
+            
+            if (newPos < 0) newPos = 0;
+            if (newPos > si.nMax - (int)si.nPage + 1) newPos = si.nMax - (int)si.nPage + 1;
+            
+            if (newPos != state.scrollX) {
+                state.scrollX = newPos;
+                SetScrollPos(hDlg, SB_HORZ, newPos, TRUE);
+                HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+                if (hStatic) InvalidateRect(hStatic, NULL, FALSE);
+            }
+        }
+        return (INT_PTR)TRUE;
+    }
+    case WM_VSCROLL: {
+        if (s_desktopStates.count(hDlg)) {
+            DesktopState& state = s_desktopStates[hDlg];
+            SCROLLINFO si = { 0 };
+            si.cbSize = sizeof(SCROLLINFO);
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hDlg, SB_VERT, &si);
+            
+            int newPos = si.nPos;
+            switch (LOWORD(wParam)) {
+            case SB_LINEUP: newPos -= 10; break;
+            case SB_LINEDOWN: newPos += 10; break;
+            case SB_PAGEUP: newPos -= si.nPage; break;
+            case SB_PAGEDOWN: newPos += si.nPage; break;
+            case SB_THUMBTRACK: newPos = si.nTrackPos; break;
+            }
+            
+            if (newPos < 0) newPos = 0;
+            if (newPos > si.nMax - (int)si.nPage + 1) newPos = si.nMax - (int)si.nPage + 1;
+            
+            if (newPos != state.scrollY) {
+                state.scrollY = newPos;
+                SetScrollPos(hDlg, SB_VERT, newPos, TRUE);
+                HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+                if (hStatic) InvalidateRect(hStatic, NULL, FALSE);
+            }
         }
         return (INT_PTR)TRUE;
     }
@@ -386,7 +551,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         AppendMenuW(hMenu, (state.isControlEnabled ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CONTROL, L"控制屏幕(&C)");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
         // AppendMenuW(hMenu, (state.isFullscreen ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_FULLSCREEN, L"全屏显示(&F)");
-        // AppendMenuW(hMenu, (state.isStretched ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_STRETCH, L"拉伸显示(&S)");
+        AppendMenuW(hMenu, (state.isStretched ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_STRETCH, L"拉伸显示(&S)");
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_TRACK_CURSOR, L"跟踪光标(&T)");
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_REMOTE_CURSOR, L"显示远程光标(&R)");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
@@ -453,11 +618,15 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             break;
         }
         
-        case IDM_DESKTOP_STRETCH:
+        case IDM_DESKTOP_STRETCH: {
             state.isStretched = !state.isStretched;
-            MessageBoxW(hDlg, state.isStretched ? L"已启用拉伸显示" : L"已禁用拉伸显示", L"提示", MB_OK);
+            RECT rc;
+            GetClientRect(hDlg, &rc);
+            UpdateScrollBars(hDlg, state, rc.right, rc.bottom);
+            HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
+            if (hStatic) InvalidateRect(hStatic, NULL, FALSE);
             break;
-            
+        }            
         case IDM_DESKTOP_FPS_5:
         case IDM_DESKTOP_FPS_10:
         case IDM_DESKTOP_FPS_15:
