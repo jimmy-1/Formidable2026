@@ -52,8 +52,8 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             g_Settings.bEnableFrp = IsDlgButtonChecked(hDlg, IDC_RADIO_FRP_YES) == BST_CHECKED;
 
             // 保存桌面管理设置
-            g_Settings.screenCaptureMethod = SendDlgItemMessage(hDlg, IDC_COMBO_CAPTURE_METHOD, CB_GETCURSEL, 0, 0);
-            g_Settings.imageCompressMethod = SendDlgItemMessage(hDlg, IDC_COMBO_COMPRESS_METHOD, CB_GETCURSEL, 0, 0);
+            g_Settings.screenCaptureMethod = (int)SendDlgItemMessage(hDlg, IDC_COMBO_CAPTURE_METHOD, CB_GETCURSEL, 0, 0);
+            g_Settings.imageCompressMethod = (int)SendDlgItemMessage(hDlg, IDC_COMBO_COMPRESS_METHOD, CB_GETCURSEL, 0, 0);
             g_Settings.enableMultiMonitor = IsDlgButtonChecked(hDlg, IDC_RADIO_MULTIMON_YES) == BST_CHECKED;
             g_Settings.useDiffTransmission = IsDlgButtonChecked(hDlg, IDC_CHECK_DIFF_TRANS) == BST_CHECKED;
 

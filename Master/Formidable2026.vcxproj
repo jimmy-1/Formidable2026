@@ -266,7 +266,7 @@
     <Delete Files="$(SolutionDir)Formidable2026_x64.exe" Condition="Exists('$(SolutionDir)Formidable2026_x64.exe')" />
     <MakeDir Directories="$(SolutionDir)Formidable2026\x86;$(SolutionDir)Formidable2026\x64" />
     <ItemGroup>
-      <ThirdPartyFiles Include="$(OutDir)frpc.exe;$(OutDir)frps.exe;$(OutDir)frpc.toml;$(OutDir)frps.toml;$(OutDir)avcodec-62.dll;$(OutDir)avutil-60.dll;$(OutDir)swscale-9.dll" />
+      <ThirdPartyFiles Include="$(OutDir)frpc.exe;$(OutDir)frps.exe;$(OutDir)frpc.toml;$(OutDir)frps.toml;$(OutDir)avcodec-62.dll;$(OutDir)avutil-60.dll;$(OutDir)swscale-9.dll;$(OutDir)LICENSE;$(OutDir)libmp3lame_x64.dll;$(OutDir)libmp3lame_x86.dll;$(OutDir)turbojpeg_x64.dll;$(OutDir)turbojpeg_x86.dll;$(OutDir)upx32.exe;$(OutDir)upx64.exe;$(OutDir)zlibwapi_x64.dll;$(OutDir)zlibwapi_x86.dll" />
     </ItemGroup>
     <Delete Files="@(ThirdPartyFiles)" />
   </Target>

@@ -1,0 +1,548 @@
+﻿  BufferPool.cpp
+  FuncHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\GeneralHelper.h(221,11): error C1083: 无法打开包括文件: “atlstr.h”: No such file or directory
+  (编译源文件“Src/Common/BufferPool.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(40,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(42,4): warning C4996: 'sprintf': This function or variable may be unsafe. Consider using sprintf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(46,3): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(48,3): warning C4996: 'strerror': This function or variable may be unsafe. Consider using strerror_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(85,10): error C2039: "Format": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(89,9): error C2665: “SetThreadName”: 没有重载函数可以转换所有参数类型
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.h(151,6):
+      可能是“BOOL SetThreadName(HANDLE,LPCTSTR)”
+          E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(89,9):
+          “BOOL SetThreadName(HANDLE,LPCTSTR)”: 无法将参数 2 从“CString”转换为“LPCTSTR”
+              E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(89,32):
+              没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\FuncHelper.cpp(89,9):
+      尝试匹配参数列表“(HANDLE, CString)”时
+  
+  RWLock.cpp
+  SysHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\GeneralHelper.h(221,11): error C1083: 无法打开包括文件: “atlstr.h”: No such file or directory
+  (编译源文件“Src/Common/SysHelper.cpp”)
+  
+  WaitFor.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\GeneralHelper.h(221,11): error C1083: 无法打开包括文件: “atlstr.h”: No such file or directory
+  (编译源文件“Src/Common/WaitFor.cpp”)
+  
+  ArqHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/ArqHelper.cpp”)
+  
+  HPSocket.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HPSocket.cpp”)
+  
+  HPThreadPool.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HPThreadPool.h(32,10): error C1083: 无法打开包括文件: “atlutil.h”: No such file or directory
+  (编译源文件“Src/HPThreadPool.cpp”)
+  
+  HttpAgent.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HttpAgent.cpp”)
+  
+  HttpClient.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HttpClient.cpp”)
+  
+  HttpCookie.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(106,38): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+  (编译源文件“Src/HttpCookie.cpp”)
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(106,59): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+  (编译源文件“Src/HttpCookie.cpp”)
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(106,78): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+  (编译源文件“Src/HttpCookie.cpp”)
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(115,22): error C2440: “类型强制转换”: 无法从“const CStringA”转换为“LPCSTR”
+  (编译源文件“Src/HttpCookie.cpp”)
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(115,22):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(115,11): error C3861: “hash_value”: 找不到标识符
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(131,22): error C2143: 语法错误: 缺少“;”(在“<”的前面)
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(131,9): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(131,22): error C2059: 语法错误:“<”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(132,9): error C2653: “CCookiePtrSet”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(132,24): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(132,47): error C2146: 语法错误: 缺少“;”(在标识符“CCookiePtrSetCI”的前面)
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(133,9): error C2653: “CCookiePtrSet”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(133,24): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(133,43): error C2146: 语法错误: 缺少“;”(在标识符“CCookiePtrSetI”的前面)
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(135,22): error C2059: 语法错误:“<”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(137,9): error C2653: “CCookieSet”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(138,9): error C2653: “CCookieSet”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(140,22): error C2143: 语法错误: 缺少“;”(在“<”的前面)
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(140,9): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(140,22): error C2059: 语法错误:“<”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(141,3): error C2653: “cstringa_hash_func”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(141,29): error C2653: “cstringa_hash_func”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(142,9): error C2653: “CCookiePathMap”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(143,9): error C2653: “CCookiePathMap”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(145,22): error C2059: 语法错误:“<”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(146,3): error C2653: “cstringa_nc_hash_func”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(146,32): error C2653: “cstringa_nc_hash_func”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(147,9): error C2653: “CCookieDomainMap”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(148,9): error C2653: “CCookieDomainMap”: 不是类或命名空间名称
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(159,18): error C2061: 语法错误: 标识符“CCookieSet”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(168,30): error C2061: 语法错误: 标识符“CCookiePathMap”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(170,40): error C2061: 语法错误: 标识符“CCookiePathMap”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(171,38): error C2061: 语法错误: 标识符“CCookieSet”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(174,26): error C2061: 语法错误: 标识符“CCookieSet”
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(177,12): error C2143: 语法错误: 缺少“;”(在“*”的前面)
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(177,2): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(177,68): error C2238: 意外的标记位于“;”之前
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(192,19): error C3646: “m_cookies”: 未知重写说明符
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(192,2): error C4430: 缺少类型说明符 - 假定为 int。注意: C++ 不支持默认 int
+  (编译源文件“Src/HttpCookie.cpp”)
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(54,33): error C2039: "Tokenize": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(55,12): error C2039: "Trim": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(61,15): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(66,16): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(74,14): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(76,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(78,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(78,65): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(79,15): error C2664: “int atoi(const char *)”: 无法将参数 1 从“CStringA”转换为“const char *”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(79,20):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stdlib.h(451,62):
+      参见“atoi”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(79,15):
+      尝试匹配参数列表“(CStringA)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(80,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(80,65): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(84,9): error C2664: “BOOL CCookie::ParseExpires(LPCSTR,__time64_t &)”: 无法将参数 1 从“CStringA”转换为“LPCSTR”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(84,22):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(91,14):
+      参见“CCookie::ParseExpires”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(84,9):
+      尝试匹配参数列表“(CStringA, __time64_t)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(89,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(91,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(93,19): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(95,15): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(95,35): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(97,20): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(99,20): error C2039: "CompareNoCase": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(110,32): error C2665: “CCookie::CCookie”: 没有重载函数可以转换所有参数类型
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.h(71,2):
+      可能是“CCookie::CCookie(LPCSTR,LPCSTR,LPCSTR,LPCSTR,int,BOOL,BOOL,CCookie::EnSameSite)”
+          E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(110,32):
+          “CCookie::CCookie(LPCSTR,LPCSTR,LPCSTR,LPCSTR,int,BOOL,BOOL,CCookie::EnSameSite)”: 无法将参数 1 从“CStringA”转换为“LPCSTR”
+              E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(110,33):
+              没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(110,32):
+      尝试匹配参数列表“(CStringA, CStringA, CStringA, CStringA, int, BOOL, BOOL, CCookie::EnSameSite)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(126,21): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(130,20): error C2440: “类型强制转换”: 无法从“CStringA”转换为“LPCSTR”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(130,20):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(130,3): error C2660: “memcpy”: 函数不接受 2 个参数
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\vcruntime_string.h(43,15):
+      参见“memcpy”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(130,3):
+      尝试匹配参数列表“(char [], unsigned int)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(145,12): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(147,13): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(148,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(149,11): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(150,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(152,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(154,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(156,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(158,13): error C2039: "AppendFormat": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(166,28): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(168,18): error C2664: “int _stricmp(const char *,const char *)”: 无法将参数 2 从“CStringA”转换为“const char *”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(168,47):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\string.h(189,22):
+      参见“_stricmp”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(168,18):
+      尝试匹配参数列表“(LPCSTR, CStringA)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(172,34): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(172,5): error C2660: “strncmp”: 函数不接受 2 个参数
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\string.h(271,22):
+      参见“strncmp”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(172,5):
+      尝试匹配参数列表“(LPCSTR, CStringA)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(181,28): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(187,15): error C2440: “类型强制转换”: 无法从“CStringA”转换为“LPCSTR”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(187,15):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(193,15): error C2440: “类型强制转换”: 无法从“CStringA”转换为“LPCSTR”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(193,15):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(206,19): error C2039: "Find": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(212,21): error C2039: "Left": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(213,21): error C2039: "Mid": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(215,10): error C2039: "Trim": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(218,9): error C2039: "Trim": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(260,21): error C2039: "Find": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(266,18): error C2039: "Find": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(274,21): error C2039: "Mid": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(275,11): error C2039: "Remove": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(277,13): error C2664: “int atoi(const char *)”: 无法将参数 1 从“CStringA”转换为“const char *”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(277,18):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+      C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\ucrt\stdlib.h(451,62):
+      参见“atoi”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(277,13):
+      尝试匹配参数列表“(CStringA)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(295,15): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(298,12): error C2039: "TrimLeft": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(300,20): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(305,13): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(308,24): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(313,13): error C2039: "GetAt": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(315,22): error C2039: "ReverseFind": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(318,22): error C2039: "Left": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(320,12): error C2039: "Empty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(323,14): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(323,35): error C2039: "GetAt": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(324,11): error C2039: "Insert": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(326,18): error C2039: "IsEmpty": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(347,6): error C2039: "Format": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(357,21): error C2039: "GetLength": 不是 "std::basic_string<char,std::char_traits<char>,std::allocator<char>>" 的成员
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\xstring(541,7):
+      参见“std::basic_string<char,std::char_traits<char>,std::allocator<char>>”的声明
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(361,20): error C2440: “类型强制转换”: 无法从“CStringA”转换为“LPCSTR”
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(361,20):
+      没有可用于执行该转换的用户定义的转换运算符，或者无法调用该运算符
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(361,3): error C2660: “memcpy”: 函数不接受 2 个参数
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.44.35207\include\vcruntime_string.h(43,15):
+      参见“memcpy”的声明
+      E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(361,3):
+      尝试匹配参数列表“(char [], unsigned int)”时
+  
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(392,3): error C2065: “CCookieSet”: 未声明的标识符
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(392,15): error C2065: “pCookieSet”: 未声明的标识符
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\HttpCookie.cpp(392,15): error C1003: 错误计数超过 100；正在停止编译
+  HttpHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HttpHelper.cpp”)
+  
+  HttpServer.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HttpServer.cpp”)
+  
+  MiscHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/MiscHelper.cpp”)
+  
+  SocketHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\GeneralHelper.h(221,11): error C1083: 无法打开包括文件: “atlstr.h”: No such file or directory
+  (编译源文件“Src/SocketHelper.cpp”)
+  
+  SSLAgent.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/SSLAgent.cpp”)
+  
+  SSLClient.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/SSLClient.cpp”)
+  
+  SSLHelper.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\Common\GeneralHelper.h(221,11): error C1083: 无法打开包括文件: “atlstr.h”: No such file or directory
+  (编译源文件“Src/SSLHelper.cpp”)
+  
+  HPSocket-SSL.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/HPSocket-SSL.cpp”)
+  
+  SSLServer.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/SSLServer.cpp”)
+  
+  正在生成代码...
+  正在编译...
+  TcpAgent.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/TcpAgent.cpp”)
+  
+  TcpClient.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/TcpClient.cpp”)
+  
+  TcpServer.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/TcpServer.cpp”)
+  
+  UdpArqClient.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpArqClient.cpp”)
+  
+  UdpArqServer.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpArqServer.cpp”)
+  
+  UdpCast.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpCast.cpp”)
+  
+  UdpClient.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpClient.cpp”)
+  
+  UdpNode.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpNode.cpp”)
+  
+  UdpServer.cpp
+E:\github\Formidable2026\thirdparty\HP-Socket\Windows\Src\SocketHelper.h(30,10): error C1083: 无法打开包括文件: “atlfile.h”: No such file or directory
+  (编译源文件“Src/UdpServer.cpp”)
+  
+  正在生成代码...

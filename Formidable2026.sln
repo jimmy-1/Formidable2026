@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.2.11415.280 d18.0
+VisualStudioVersion = 18.2.11415.280
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Formidable2026", "Master\Formidable2026.vcxproj", "{D58E96CD-C41F-4DD1-9502-EF1CB7AC65E5}"
 	ProjectSection(ProjectDependencies) = postProject
@@ -40,6 +40,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ModuleWindowManager", "Modules\WindowManager\ModuleWindowManager.vcxproj", "{9BE0B2B4-1CF4-4123-A38F-9746F6091934}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ShellCodeLoader", "ClientSide\Loaders\ShellCode\ShellCodeLoader.vcxproj", "{4A285F31-54E3-4BE5-B295-88DA788D50A9}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Dropper", "ClientSide\Loaders\Dropper\Dropper.vcxproj", "{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -153,6 +155,14 @@ Global
 		{4A285F31-54E3-4BE5-B295-88DA788D50A9}.Release|Win32.Build.0 = Release|Win32
 		{4A285F31-54E3-4BE5-B295-88DA788D50A9}.Release|x64.ActiveCfg = Release|x64
 		{4A285F31-54E3-4BE5-B295-88DA788D50A9}.Release|x64.Build.0 = Release|x64
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Debug|Win32.ActiveCfg = Debug|Win32
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Debug|Win32.Build.0 = Debug|Win32
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Debug|x64.ActiveCfg = Debug|x64
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Debug|x64.Build.0 = Debug|x64
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Release|Win32.ActiveCfg = Release|Win32
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Release|Win32.Build.0 = Release|Win32
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Release|x64.ActiveCfg = Release|x64
+		{B1C3D4E5-F6A7-48B9-C0D1-E2F3A4B5C6D7}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

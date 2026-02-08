@@ -43,13 +43,20 @@ static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, u
         tvi.cchTextMax = 256;
         tvi.hItem = hCurrent;
         if (TreeView_GetItem(hTree, &tvi)) {
-            if (tvi.lParam >= 0 && tvi.lParam < 5) {
+            HTREEITEM hParent = TreeView_GetParent(hTree, hCurrent);
+            bool isRoot = (hParent == NULL);
+
+            if (isRoot && tvi.lParam >= 0 && tvi.lParam < 5) {
                 // 根键
                 rootIdx = (uint32_t)tvi.lParam;
                 const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
                 pathParts.push_back(rootKeys[tvi.lParam]);
             } else {
                 pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
+                // 子节点也存储了 rootIdx
+                if (tvi.lParam >= 0 && tvi.lParam < 5) {
+                    rootIdx = (uint32_t)tvi.lParam;
+                }
             }
         }
         hCurrent = TreeView_GetParent(hTree, hCurrent);
@@ -274,12 +281,16 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                         tvi.cchTextMax = 256;
                         tvi.hItem = hItem;
                         if (TreeView_GetItem(hTree, &tvi)) {
-                            if (tvi.lParam >= 0 && tvi.lParam < 5) {
+                            HTREEITEM hParent = TreeView_GetParent(hTree, hItem);
+                            bool isRoot = (hParent == NULL);
+
+                            if (isRoot && tvi.lParam >= 0 && tvi.lParam < 5) {
                                 rootIdx = (uint32_t)tvi.lParam;
                                 const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
                                 pathParts.push_back(rootKeys[tvi.lParam]);
                             } else {
                                 pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
+                                if (tvi.lParam >= 0 && tvi.lParam < 5) rootIdx = (uint32_t)tvi.lParam;
                             }
                         }
                         hItem = TreeView_GetParent(hTree, hItem);
@@ -338,12 +349,16 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                                 tvi2.cchTextMax = 256;
                                 tvi2.hItem = hItem;
                                 if (TreeView_GetItem(hTree, &tvi2)) {
-                                    if (tvi2.lParam >= 0 && tvi2.lParam < 5) {
+                                    HTREEITEM hParent = TreeView_GetParent(hTree, hItem);
+                                    bool isRoot = (hParent == NULL);
+
+                                    if (isRoot && tvi2.lParam >= 0 && tvi2.lParam < 5) {
                                         rootIdx = (uint32_t)tvi2.lParam;
                                         const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
                                         pathParts.push_back(rootKeys[tvi2.lParam]);
                                     } else {
                                         pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
+                                        if (tvi2.lParam >= 0 && tvi2.lParam < 5) rootIdx = (uint32_t)tvi2.lParam;
                                     }
                                 }
                                 hItem = TreeView_GetParent(hTree, hItem);

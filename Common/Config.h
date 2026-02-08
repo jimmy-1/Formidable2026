@@ -48,6 +48,7 @@ namespace Formidable {
         CMD_PROCESS_MODULES = 42, // 获取进程模块列表
         CMD_PROCESS_SUSPEND = 43, // 挂起进程
         CMD_PROCESS_RESUME = 44, // 恢复进程
+        CMD_NETWORK_LIST = 45,   // 获取网络连接列表
         
         // 窗口/桌面管理 (50-59)
         CMD_WINDOW_LIST = 50,   // 获取窗口列表

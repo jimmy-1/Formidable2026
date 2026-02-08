@@ -49,6 +49,7 @@ struct LocalWindowInfo {
     HWND hwnd;
     std::string title;
     std::string className;
+    DWORD pid;
     bool isVisible;
 };
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
@@ -64,6 +65,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         info.hwnd = hwnd;
         info.title = WideToUTF8(title);
         info.className = WideToUTF8(className);
+        GetWindowThreadProcessId(hwnd, &info.pid);
         info.isVisible = IsWindowVisible(hwnd);
         windows->push_back(info);
     }
@@ -76,7 +78,7 @@ std::string ListWindows() {
     
     std::stringstream ss;
     for (const auto& w : windows) {
-        ss << (uint64_t)w.hwnd << "|" << w.className << "|" << w.title << "\n";
+        ss << (uint64_t)w.hwnd << "|" << w.pid << "|" << w.className << "|" << w.title << "\n";
     }
     
     return ss.str();

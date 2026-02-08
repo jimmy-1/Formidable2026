@@ -146,4 +146,25 @@ bool NetworkServer::GetClientAddress(CONNID dwConnID, char* lpszAddress, int& iA
     return result;
 }
 
+void NetworkServer::SetKeepAliveTime(DWORD dwKeepAliveTime)
+{
+    if (m_pServer.IsValid()) {
+        m_pServer->SetKeepAliveTime(dwKeepAliveTime);
+    }
+}
+
+void NetworkServer::SetKeepAliveInterval(DWORD dwKeepAliveInterval)
+{
+    if (m_pServer.IsValid()) {
+        m_pServer->SetKeepAliveInterval(dwKeepAliveInterval);
+    }
+}
+
+void NetworkServer::SetMaxConnectionCount(DWORD dwMaxConnectionCount)
+{
+    if (m_pServer.IsValid()) {
+        m_pServer->SetMaxConnectionCount(dwMaxConnectionCount);
+    }
+}
+
 } // namespace Formidable

@@ -102,6 +102,9 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
         case Formidable::CMD_PROCESS_MODULES:
             HandleModuleList(clientId, pkg, iLength);
             break;
+        case Formidable::CMD_NETWORK_LIST:
+            HandleNetworkList(clientId, pkg, iLength);
+            break;
         case Formidable::CMD_SERVICE_LIST:
         case Formidable::CMD_SERVICE_START:
         case Formidable::CMD_SERVICE_STOP:
@@ -523,15 +526,18 @@ void CommandHandler::HandleWindowList(uint32_t clientId, const Formidable::Comma
         while (std::getline(ss, line)) {
             if (line.empty()) continue;
 
-            // 解析每行数据：hwnd|className|title
+            // 解析每行数据：hwnd|pid|className|title
             size_t pos1 = line.find('|');
             if (pos1 == std::string::npos) continue;
             size_t pos2 = line.find('|', pos1 + 1);
             if (pos2 == std::string::npos) continue;
+            size_t pos3 = line.find('|', pos2 + 1);
+            if (pos3 == std::string::npos) continue; // New format requires PID
 
             std::string hwndStr = line.substr(0, pos1);
-            std::string classNameStr = line.substr(pos1 + 1, pos2 - pos1 - 1);
-            std::string titleStr = line.substr(pos2 + 1);
+            std::string pidStr = line.substr(pos1 + 1, pos2 - pos1 - 1);
+            std::string classNameStr = line.substr(pos2 + 1, pos3 - pos2 - 1);
+            std::string titleStr = line.substr(pos3 + 1);
 
             // 转换hwnd
             uint64_t hwnd = 0;
@@ -542,7 +548,8 @@ void CommandHandler::HandleWindowList(uint32_t clientId, const Formidable::Comma
             }
 
             std::wstring wTitle = Utils::StringHelper::UTF8ToWide(titleStr);
-            std::wstring wStatus = L"可见";
+            std::wstring wClassName = Utils::StringHelper::UTF8ToWide(classNameStr);
+            std::wstring wPid = Utils::StringHelper::UTF8ToWide(pidStr);
 
             wchar_t szHwnd[32];
             swprintf_s(szHwnd, L"0x%016llX", hwnd);
@@ -555,7 +562,8 @@ void CommandHandler::HandleWindowList(uint32_t clientId, const Formidable::Comma
             int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
 
             ListView_SetItemText(hList, idx, 1, szHwnd);
-            ListView_SetItemText(hList, idx, 2, (LPWSTR)wStatus.c_str());
+            ListView_SetItemText(hList, idx, 2, (LPWSTR)wPid.c_str());
+            ListView_SetItemText(hList, idx, 3, (LPWSTR)wClassName.c_str());
 
             index++;
         }
@@ -908,6 +916,9 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
         std::stringstream ss(data);
         std::string line;
         int index = 0;
+        int dirCount = 0;
+        int fileCount = 0;
+        unsigned long long totalSize = 0;
 
         while (std::getline(ss, line)) {
             if (line.empty()) continue;
@@ -924,6 +935,9 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
                 std::string timeStr = line.substr(p3 + 1);
 
                 bool isDir = (typeStr == "[DIR]");
+                if (isDir) dirCount++;
+                else fileCount++;
+
                 std::wstring wName = Formidable::Utils::StringHelper::UTF8ToWide(nameStr);
                 
                 // 获取正确的文件图标索引
@@ -948,6 +962,7 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
                     wSize = L"<DIR>";
                 } else {
                     unsigned long long size = std::stoull(sizeStr);
+                    totalSize += size;
                     if (size > 1024 * 1024 * 1024)
                         wSize = std::to_wstring(size / (1024 * 1024 * 1024)) + L" GB";
                     else if (size > 1024 * 1024)
@@ -974,6 +989,25 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
             }
         }
         SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+
+        // 更新状态栏显示文件统计信息
+        HWND hStatusBar = GetDlgItem(client->hFileDlg, IDC_STATUS_FILE_BAR);
+        if (hStatusBar) {
+            wchar_t szTotalSize[64] = {0};
+            if (totalSize > 1024 * 1024 * 1024)
+                swprintf_s(szTotalSize, L"%.2f GB", totalSize / (double)(1024 * 1024 * 1024));
+            else if (totalSize > 1024 * 1024)
+                swprintf_s(szTotalSize, L"%.2f MB", totalSize / (double)(1024 * 1024));
+            else if (totalSize > 1024)
+                swprintf_s(szTotalSize, L"%.2f KB", totalSize / (double)1024);
+            else
+                swprintf_s(szTotalSize, L"%llu B", totalSize);
+
+            wchar_t szStatus[256] = {0};
+            swprintf_s(szStatus, L" %d 个项目  |  %d 个文件夹  |  %d 个文件  |  总大小: %s", 
+                      dirCount + fileCount, dirCount, fileCount, szTotalSize);
+            SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
+        }
     }
 }
 
@@ -1281,6 +1315,57 @@ void CommandHandler::HandleVoiceStream(uint32_t clientId, const Formidable::Comm
             HeapFree(GetProcessHeap(), 0, pWh);
         }
     }
+}
+
+void CommandHandler::HandleNetworkList(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (g_Clients.count(clientId)) client = g_Clients[clientId];
+    }
+    
+    if (!client || !client->hNetworkDlg || !IsWindow(client->hNetworkDlg)) return;
+
+    HWND hList = GetDlgItem(client->hNetworkDlg, IDC_LIST_NETWORK);
+    SendMessageW(hList, WM_SETREDRAW, FALSE, 0);
+    ListView_DeleteAllItems(hList);
+
+    std::string data(pkg->data, pkg->arg1);
+    std::stringstream ss(data);
+    std::string line;
+    
+    int i = 0;
+    while (std::getline(ss, line)) {
+        if (line.empty()) continue;
+        
+        std::vector<std::string> tokens = Utils::StringHelper::Split(line, '|');
+        if (tokens.size() < 7) continue; // Protocol|LocalIP|LocalPort|RemoteIP|RemotePort|State|PID
+        
+        std::wstring protocol = Utils::StringHelper::UTF8ToWide(tokens[0]);
+        std::wstring localIp = Utils::StringHelper::UTF8ToWide(tokens[1]);
+        std::wstring localPort = Utils::StringHelper::UTF8ToWide(tokens[2]);
+        std::wstring remoteIp = Utils::StringHelper::UTF8ToWide(tokens[3]);
+        std::wstring remotePort = Utils::StringHelper::UTF8ToWide(tokens[4]);
+        std::wstring state = Utils::StringHelper::UTF8ToWide(tokens[5]);
+        std::wstring pid = Utils::StringHelper::UTF8ToWide(tokens[6]);
+        
+        LVITEMW lvi = { 0 };
+        lvi.mask = LVIF_TEXT;
+        lvi.iItem = i;
+        lvi.pszText = (LPWSTR)protocol.c_str();
+        int index = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+        
+        ListView_SetItemText(hList, index, 1, (LPWSTR)localIp.c_str());
+        ListView_SetItemText(hList, index, 2, (LPWSTR)localPort.c_str());
+        ListView_SetItemText(hList, index, 3, (LPWSTR)remoteIp.c_str());
+        ListView_SetItemText(hList, index, 4, (LPWSTR)remotePort.c_str());
+        ListView_SetItemText(hList, index, 5, (LPWSTR)state.c_str());
+        ListView_SetItemText(hList, index, 6, (LPWSTR)pid.c_str());
+        
+        i++;
+    }
+    
+    SendMessageW(hList, WM_SETREDRAW, TRUE, 0);
 }
 
 } // namespace Core

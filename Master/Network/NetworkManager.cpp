@@ -40,6 +40,13 @@ bool NetworkManager::Initialize(int port) {
     s_pServer->SetOnReceive([](CONNID connId, const BYTE* pData, int iLength) { NetworkManager::OnReceive(connId, pData, iLength); });
     s_pServer->SetOnClose([](CONNID connId) { NetworkManager::OnClose(connId); });
     
+    // 设置心跳检查次数和间隔 (5秒一次，3次超时)
+    s_pServer->SetKeepAliveTime(5000);
+    s_pServer->SetKeepAliveInterval(3000);
+
+    // 设置最大连接数
+    s_pServer->SetMaxConnectionCount(10000);
+
     // 启动服务器
     if (!s_pServer->Start("0.0.0.0", (USHORT)port)) {
         g_pNetworkServer = nullptr;

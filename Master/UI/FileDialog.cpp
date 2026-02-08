@@ -271,28 +271,68 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         GetClientRect(hDlg, &rc);
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
-        
-        // 远程路径输入框和按钮
-        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_FILE_PATH_REMOTE), 5, 7, 35, 12, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_FILE_PATH_REMOTE), 45, 5, width - 100, 14, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_GO_REMOTE), width - 50, 4, 45, 16, TRUE);
-        
-        int btnY = height - 24;
-        if (btnY < 25) btnY = 25;
 
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK), 5, btnY, 55, 18, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_MKDIR), 65, btnY, 70, 18, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_RENAME), 140, btnY, 55, 18, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_DELETE), 200, btnY, 55, 18, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_REFRESH), 260, btnY, 55, 18, TRUE);
+        int addressBarHeight = 28;
+        int toolbarHeight = 36;
+        int statusBarHeight = 22;
+        int bottomAreaHeight = 28;
+        int spacing = 4;
+        int margin = 6;
 
-        // 进度条
-        MoveWindow(GetDlgItem(hDlg, IDC_PROGRESS_BAR), 320, btnY, width - 325, 18, TRUE);
+        // 地址栏区域
+        int addressBarY = margin;
+        int searchBoxWidth = 50;
+        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_FILE_PATH_REMOTE), margin, addressBarY + 8, 50, 12, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_FILE_PATH_REMOTE), margin + 55, addressBarY + 4, width - margin * 2 - 120 - searchBoxWidth - 10, 20, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_GO_REMOTE), width - margin - 45 - searchBoxWidth - 10, addressBarY + 2, 42, 24, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_FILE_SEARCH), width - margin - searchBoxWidth - 2, addressBarY + 4, searchBoxWidth, 20, TRUE);
 
-        int listHeight = btnY - 25 - 2;
+        // 工具栏区域
+        int toolbarY = addressBarY + addressBarHeight + spacing;
+        int toolbarBtnWidth = 60;
+        int toolbarBtnHeight = 26;
+        int toolbarBtnSpacing = 4;
+        int toolbarX = margin;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_MKDIR), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_RENAME), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_DELETE), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_REFRESH), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_VIEW), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+
+        // 底部区域（进度条）
+        int bottomAreaY = height - statusBarHeight - bottomAreaHeight - margin;
+        MoveWindow(GetDlgItem(hDlg, IDC_PROGRESS_BAR), margin, bottomAreaY + 7, width - margin * 2, 14, TRUE);
+
+        // 状态栏
+        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+        MoveWindow(hStatusBar, 0, height - statusBarHeight, width, statusBarHeight, TRUE);
+
+        // 文件列表区域
+        int listY = toolbarY + toolbarHeight + spacing;
+        int listHeight = bottomAreaY - listY - spacing;
         if (listHeight < 0) listHeight = 0;
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE), 0, 25, width, listHeight, TRUE);
-        
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE), margin, listY, width - margin * 2, listHeight, TRUE);
+
+        // 动态调整列宽
+        HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+        int listWidth = width - margin * 2 - 20;
+        LVCOLUMNW col = { 0 };
+        col.mask = LVCF_WIDTH;
+        col.cx = (int)(listWidth * 0.40);
+        SendMessageW(hList, LVM_SETCOLUMNW, 0, (LPARAM)&col);
+        col.cx = (int)(listWidth * 0.15);
+        SendMessageW(hList, LVM_SETCOLUMNW, 1, (LPARAM)&col);
+        col.cx = (int)(listWidth * 0.15);
+        SendMessageW(hList, LVM_SETCOLUMNW, 2, (LPARAM)&col);
+        col.cx = (int)(listWidth * 0.30);
+        SendMessageW(hList, LVM_SETCOLUMNW, 3, (LPARAM)&col);
+
         return (INT_PTR)TRUE;
     }
     case WM_NOTIFY: {
@@ -405,6 +445,17 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         case IDC_BTN_FILE_REMOTE_REFRESH:
             SendMessageW(hDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
             break;
+        case IDC_BTN_FILE_VIEW: {
+            HWND hViewBtn = (HWND)lParam;
+            RECT rc;
+            GetWindowRect(hViewBtn, &rc);
+            HMENU hViewMenu = CreatePopupMenu();
+            AppendMenuW(hViewMenu, MF_STRING | (s_dlgViewMode[hDlg] == 1 ? MF_CHECKED : 0), IDM_FILE_VIEW_LIST, L"列表(&L)");
+            AppendMenuW(hViewMenu, MF_STRING | (s_dlgViewMode[hDlg] == 2 ? MF_CHECKED : 0), IDM_FILE_VIEW_ICON, L"图标(&I)");
+            TrackPopupMenu(hViewMenu, TPM_LEFTBUTTON | TPM_TOPALIGN | TPM_LEFTALIGN, rc.left, rc.bottom, 0, hDlg, NULL);
+            DestroyMenu(hViewMenu);
+            break;
+        }
         case IDM_FILE_VIEW_LIST:
             s_dlgViewMode[hDlg] = 1;
             SetListViewMode(hList, 1);
@@ -415,6 +466,33 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             break;
         case IDC_BTN_FILE_GO_REMOTE: {
             RefreshRemoteList(hDlg);
+            break;
+        }
+        case IDC_EDIT_FILE_SEARCH: {
+            if (HIWORD(wParam) == EN_CHANGE) {
+                HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+                wchar_t szSearch[MAX_PATH] = { 0 };
+                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_SEARCH, szSearch, MAX_PATH);
+
+                size_t searchLen = wcslen(szSearch);
+
+                if (searchLen == 0) {
+                    RefreshRemoteList(hDlg);
+                    break;
+                }
+
+                int itemCount = ListView_GetItemCount(hList);
+                for (int i = 0; i < itemCount; i++) {
+                    wchar_t szName[MAX_PATH] = { 0 };
+                    ListView_GetItemText(hList, i, 0, szName, MAX_PATH);
+
+                    if (_wcsnicmp(szName, szSearch, searchLen) != 0) {
+                        ListView_DeleteItem(hList, i);
+                        i--;
+                        itemCount--;
+                    }
+                }
+            }
             break;
         }
         case IDM_FILE_REFRESH: {

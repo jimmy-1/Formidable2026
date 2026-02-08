@@ -28,6 +28,9 @@ private:
     static void HandleProcessList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleProcessKill(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleModuleList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+
+    // 处理网络相关
+    static void HandleNetworkList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     
     // 处理窗口相关
     static void HandleWindowList(uint32_t clientId, const CommandPkg* pkg, int dataLen);

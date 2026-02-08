@@ -35,3 +35,13 @@ Formidable 2026 开发计划.txt
 # CodeQL 构建目录
 _codeql_build_dir/
 _codeql_detected_source_root
+
+# 允许 tracking thirdparty 目录下的二进制文件
+!thirdparty/**
+!thirdparty/Bin/
+thirdparty/Bin/avcodec-62.dll
+!thirdparty/Lib/
+!thirdparty/**/*.exe
+!thirdparty/**/*.dll
+!thirdparty/**/*.lib
+!thirdparty/**/*.exp

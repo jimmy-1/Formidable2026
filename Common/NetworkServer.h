@@ -74,6 +74,13 @@ public:
     // 获取最后的错误码
     EnSocketError GetLastError() { return m_pServer->GetLastError(); }
 
+    // 设置心跳
+    void SetKeepAliveTime(DWORD dwKeepAliveTime);
+    void SetKeepAliveInterval(DWORD dwKeepAliveInterval);
+
+    // 设置最大连接数
+    void SetMaxConnectionCount(DWORD dwMaxConnectionCount);
+
 private:
     CServerListener m_listener;
     CTcpServerPtr m_pServer;

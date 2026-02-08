@@ -693,10 +693,22 @@ void ScreenThread(SOCKET s) {
                 pkg->arg2 = isDiff ? 1 : 0;
                 memcpy(pkg->data, finalBuf.data(), finalBuf.size());
                 
-                send(s, pkgBuf.data(), (int)pkgBuf.size(), 0);
+                const char* pData = pkgBuf.data();
+                int remaining = (int)pkgBuf.size();
+                while (remaining > 0) {
+                    int sentBytes = send(s, pData, remaining, 0);
+                    if (sentBytes == SOCKET_ERROR || sentBytes == 0) {
+                        tjFree(jpegBuf);
+                        g_screenRunning = false;
+                        break;
+                    }
+                    pData += sentBytes;
+                    remaining -= sentBytes;
+                }
                 
                 tjFree(jpegBuf);
                 sent = true;
+                if (!g_screenRunning) break;
             }
         }
 #endif
