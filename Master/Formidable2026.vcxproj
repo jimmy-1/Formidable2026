@@ -98,6 +98,9 @@
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D /I "$(SolutionDir)thirdparty\Bin\*.*" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -163,6 +166,9 @@
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D /I "$(SolutionDir)thirdparty\Bin\*.*" "$(OutDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="main_gui.cpp" />
@@ -259,6 +265,10 @@
     <Delete Files="$(SolutionDir)Formidable2026_32.exe" Condition="Exists('$(SolutionDir)Formidable2026_32.exe')" />
     <Delete Files="$(SolutionDir)Formidable2026_x64.exe" Condition="Exists('$(SolutionDir)Formidable2026_x64.exe')" />
     <MakeDir Directories="$(SolutionDir)Formidable2026\x86;$(SolutionDir)Formidable2026\x64" />
+    <ItemGroup>
+      <ThirdPartyFiles Include="$(OutDir)frpc.exe;$(OutDir)frps.exe;$(OutDir)frpc.toml;$(OutDir)frps.toml;$(OutDir)avcodec-62.dll;$(OutDir)avutil-60.dll;$(OutDir)swscale-9.dll" />
+    </ItemGroup>
+    <Delete Files="@(ThirdPartyFiles)" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
