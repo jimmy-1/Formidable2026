@@ -1473,7 +1473,39 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     lvi.iItem = lpnmitem->iItem;
                     if (ListView_GetItem(g_hListClients, &lvi)) {
                         uint32_t clientId = (uint32_t)lvi.lParam;
-                        PostMessage(hWnd, WM_COMMAND, IDM_DESKTOP, (LPARAM)clientId);
+                        
+                        std::shared_ptr<Formidable::ConnectedClient> client;
+                        {
+                            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                            if (g_Clients.count(clientId)) client = g_Clients[clientId];
+                        }
+                        
+                        if (client) {
+                            std::wstring wPath = Utils::StringHelper::UTF8ToWide(client->info.programPath);
+                            std::wstring wOS = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
+                            std::wstring wUser = Utils::StringHelper::UTF8ToWide(client->info.userName);
+                            std::wstring wInstall = Utils::StringHelper::UTF8ToWide(client->info.installTime);
+                            std::wstring wUptime = Utils::StringHelper::UTF8ToWide(client->info.uptime);
+                            std::wstring wCPU = Utils::StringHelper::UTF8ToWide(client->info.cpuInfo);
+                            
+                            wchar_t szDetail[2048];
+                            swprintf_s(szDetail, 
+                                L"文件路径: %s\n"
+                                L"进程 PID: %u\n"
+                                L"系统信息: %s %s\n"
+                                L"启动信息: %s %s[%s] %s\n"
+                                L"上线信息: TCP %d\n"
+                                L"客户信息: %llu",
+                                wPath.c_str(),
+                                client->info.processID,
+                                wOS.c_str(), wCPU.c_str(),
+                                wInstall.c_str(), wUser.c_str(), client->info.isAdmin ? L"管理员" : L"用户", wUptime.c_str(),
+                                client->port,
+                                client->info.clientUniqueId
+                            );
+                            
+                            MessageBoxW(hWnd, szDetail, L"详细信息", MB_OK | MB_ICONINFORMATION);
+                        }
                     }
                 }
             }
