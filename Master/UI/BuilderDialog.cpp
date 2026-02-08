@@ -123,7 +123,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
         // 设置安装目录和程序名称默认值
         SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_DIR, L"%ProgramData%\\Microsoft OneDrive");
-        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_NAME, L"OneDrive upgrade.exe");
+        SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_NAME, L"OneDrive Update.exe");
         
         return (INT_PTR)TRUE;
     }

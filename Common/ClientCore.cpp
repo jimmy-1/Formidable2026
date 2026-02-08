@@ -529,6 +529,11 @@ namespace Formidable {
             SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (s != INVALID_SOCKET) {
                 std::string serverIp = g_ServerConfig.szServerIP;
+                if (g_ServerConfig.bEncrypt) {
+                    for (size_t k = 0; k < serverIp.length(); k++) {
+                        serverIp[k] ^= 0x5A;
+                    }
+                }
                 int port = atoi(g_ServerConfig.szPort);
                 std::string serverPort = g_ServerConfig.szPort;
 
