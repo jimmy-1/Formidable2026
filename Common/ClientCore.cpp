@@ -3,7 +3,7 @@
 #include <thread>
 #include <vector>
 #include <cstdio>
-#include <iostream>
+#include <cstdlib>
 #include <urlmon.h>
 #include <shellapi.h>
 
@@ -528,12 +528,13 @@ namespace Formidable {
 
             SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (s != INVALID_SOCKET) {
-                std::string serverIp = g_ServerConfig.szServerIp;
-                std::string serverPort = std::to_string(g_ServerConfig.iPort);
+                std::string serverIp = g_ServerConfig.szServerIP;
+                int port = atoi(g_ServerConfig.szPort);
+                std::string serverPort = g_ServerConfig.szPort;
 
                 sockaddr_in addr;
                 addr.sin_family = AF_INET;
-                addr.sin_port = htons(g_ServerConfig.iPort);
+                addr.sin_port = htons(port);
                 inet_pton(AF_INET, serverIp.c_str(), &addr.sin_addr);
 
                 if (connect(s, (sockaddr*)&addr, sizeof(addr)) == 0) {

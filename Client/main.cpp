@@ -9,9 +9,7 @@
 #include <ws2tcpip.h>
 #include <shellapi.h>
 #include <urlmon.h>
-#include <vector>
 #include <string>
-#include <thread>
 #include <atomic>
 
 #include "../Common/Config.h"
