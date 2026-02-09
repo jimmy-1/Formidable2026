@@ -20,7 +20,7 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_SERVICE)));
         
         HWND hList = GetDlgItem(hDlg, IDC_LIST_SERVICE);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
         lvc.pszText = (LPWSTR)L"服务名";     lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
@@ -30,6 +30,7 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         lvc.pszText = (LPWSTR)L"服务类型";   lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 4, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"文件路径";   lvc.cx = 300; SendMessageW(hList, LVM_INSERTCOLUMNW, 5, (LPARAM)&lvc);
         
+        ApplyModernTheme(hDlg);
         // 初始化后自动刷新
         SendMessage(hDlg, WM_COMMAND, IDC_BTN_SERVICE_REFRESH, 0);
         return (INT_PTR)TRUE;

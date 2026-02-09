@@ -10,6 +10,7 @@
 #include "../../Common/ClientTypes.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
+#include "../GlobalState.h"
 #include "../NetworkHelper.h"
 #include "../Core/CommandHandler.h"
 #include <CommCtrl.h>
@@ -39,7 +40,7 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_NETWORK)));
         
         HWND hList = GetDlgItem(hDlg, IDC_LIST_NETWORK);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -53,6 +54,7 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         lvc.pszText = (LPWSTR)L"状态";     lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 7, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"进程目录"; lvc.cx = 260; SendMessageW(hList, LVM_INSERTCOLUMNW, 8, (LPARAM)&lvc);
         
+        ApplyModernTheme(hDlg);
         SendMessage(hDlg, WM_COMMAND, IDM_NET_REFRESH, 0);
         return (INT_PTR)TRUE;
     }

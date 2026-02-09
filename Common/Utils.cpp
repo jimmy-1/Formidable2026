@@ -220,6 +220,37 @@ namespace Formidable {
         freeaddrinfo(res);
         return ip;
     }
+
+    std::string GetPublicIP() {
+        std::string ip = "";
+        HINTERNET hInternet = InternetOpenA("Formidable2026", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
+        if (hInternet) {
+            // 使用多个服务以防万一
+            const char* urls[] = {
+                "http://api.ipify.org",
+                "http://icanhazip.com",
+                "http://ifconfig.me/ip"
+            };
+            for (int i = 0; i < 3; i++) {
+                HINTERNET hUrl = InternetOpenUrlA(hInternet, urls[i], NULL, 0, INTERNET_FLAG_RELOAD, 0);
+                if (hUrl) {
+                    char buffer[64];
+                    DWORD bytesRead = 0;
+                    if (InternetReadFile(hUrl, buffer, sizeof(buffer) - 1, &bytesRead)) {
+                        buffer[bytesRead] = '\0';
+                        ip = buffer;
+                        // 移除可能的换行符
+                        ip.erase(ip.find_last_not_of(" \n\r\t") + 1);
+                    }
+                    InternetCloseHandle(hUrl);
+                    if (!ip.empty()) break;
+                }
+            }
+            InternetCloseHandle(hInternet);
+        }
+        return ip;
+    }
+
     std::string GetLocationByIP(const std::string& ip) {
         std::string location = WideToUTF8(L"未知");
         HINTERNET hInternet = InternetOpenA("Formidable2026", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);

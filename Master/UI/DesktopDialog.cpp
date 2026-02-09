@@ -381,6 +381,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             SetWindowSubclass(hStatic, DesktopScreenProc, clientId, (DWORD_PTR)hDlg);
         }
 
+        ApplyModernTheme(hDlg);
         return (INT_PTR)TRUE;
     }
     case WM_SIZE: {

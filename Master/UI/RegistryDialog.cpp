@@ -208,7 +208,7 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
 
         SetWindowSubclass(hPathEdit, RegistryPathEditSubclassProc, 0, (DWORD_PTR)hDlg);
         
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -236,6 +236,7 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         
         // 等待模块加载完成（模块已由 MainWindow 发送）
         Sleep(100);
+        ApplyModernTheme(hDlg);
         
         // 初始化 HKLM
         // 注意：这里手动发送请求，而不通过辅助函数，因为需要特殊处理？

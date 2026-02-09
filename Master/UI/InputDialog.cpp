@@ -48,6 +48,7 @@ INT_PTR CALLBACK InputDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LP
         
         // 设置焦点到输入框
         SetFocus(GetDlgItem(hDlg, IDC_EDIT_INPUT));
+        ApplyModernTheme(hDlg);
         return FALSE; // 返回FALSE因为我们手动设置了焦点
     }
     

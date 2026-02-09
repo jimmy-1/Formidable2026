@@ -475,7 +475,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         InitNavImageList();
 
         HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
 
         // 设置图标列表（小/大）
         if (s_hFileImageListSmall) ListView_SetImageList(hList, s_hFileImageListSmall, LVSIL_SMALL);
@@ -522,6 +522,8 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
         // 延迟自动刷新
         SetTimer(hDlg, 1, 500, NULL);
+
+        ApplyModernTheme(hDlg);
         
         return (INT_PTR)TRUE;
     }

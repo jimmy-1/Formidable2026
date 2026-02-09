@@ -10,6 +10,7 @@
 #include "../../Common/Config.h"
 #include "../../Common/ClientTypes.h"
 #include "../Utils/StringHelper.h"
+#include "../GlobalState.h"
 #include <CommCtrl.h>
 #include <vector>
 #include <map>
@@ -222,7 +223,7 @@ INT_PTR CALLBACK TerminalDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
 
         // 初始化常用命令列表
         HWND hList = GetDlgItem(hDlg, IDC_LIST_COMMON_CMDS);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -258,6 +259,7 @@ INT_PTR CALLBACK TerminalDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
             ListView_SetItemText(hList, i, 1, (LPWSTR)commonCmds[i].desc);
         }
 
+        ApplyModernTheme(hDlg);
         return (INT_PTR)FALSE;
     }
     case WM_CTLCOLOREDIT:

@@ -52,6 +52,7 @@ struct ConnectedClient {
     // 群控功能字段
     std::wstring remark;  // 备注信息
     std::wstring group;   // 分组名称
+    std::wstring location; // 地理位置
 
     // 窗口句柄
     HWND hProcessDlg;

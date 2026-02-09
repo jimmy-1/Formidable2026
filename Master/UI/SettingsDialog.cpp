@@ -36,6 +36,7 @@ INT_PTR CALLBACK SettingsDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 
         CheckDlgButton(hDlg, IDC_CHECK_DIFF_TRANS, g_Settings.useDiffTransmission ? BST_CHECKED : BST_UNCHECKED);
 
+        ApplyModernTheme(hDlg);
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND:

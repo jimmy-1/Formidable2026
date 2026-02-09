@@ -31,7 +31,7 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_HISTORY)));
 
         HWND hList = GetDlgItem(hDlg, IDC_LIST_HISTORY);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
 
         const wchar_t* headers[] = { L"ID", L"备注", L"计算机名称", L"位置", L"IP", L"系统", L"安装时间", L"最后登录", L"程序路径" };
         int widths[] = { 110, 120, 140, 160, 120, 140, 150, 150, 260 };
@@ -43,6 +43,8 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             lvc.cx = widths[i];
             SendMessageW(hList, LVM_INSERTCOLUMNW, i, (LPARAM)&lvc);
         }
+
+        ApplyModernTheme(hDlg);
 
         // 加载数据
         struct LocTask { int item; std::wstring key; std::wstring ip; };

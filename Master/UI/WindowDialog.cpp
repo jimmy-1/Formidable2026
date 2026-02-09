@@ -21,7 +21,7 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_WINDOW)));
         
         HWND hList = GetDlgItem(hDlg, IDC_LIST_WINDOW);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
         lvc.pszText = (LPWSTR)L"窗口标题"; lvc.cx = 250; SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
@@ -29,6 +29,7 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         lvc.pszText = (LPWSTR)L"PID";      lvc.cx = 60;  SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"类名";     lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
         
+        ApplyModernTheme(hDlg);
         // 初始化时刷新窗口列表
         SendMessage(hDlg, WM_COMMAND, IDM_WINDOW_REFRESH, 0);
         return (INT_PTR)TRUE;

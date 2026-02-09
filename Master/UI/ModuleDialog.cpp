@@ -29,7 +29,7 @@ INT_PTR CALLBACK ModuleDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         if (client) client->hModuleDlg = hDlg;
 
         HWND hList = GetDlgItem(hDlg, IDC_LIST_MODULES);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
 
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -38,6 +38,7 @@ INT_PTR CALLBACK ModuleDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         lvc.pszText = (LPWSTR)L"大小";     lvc.cx = 80;  SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"路径";     lvc.cx = 300; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
 
+        ApplyModernTheme(hDlg);
         // 获取选中客户端
         AddLog(L"查询", L"获取进程模块 PID: " + std::to_wstring((int)p->pid));
         SendModuleToClient(p->cid, Formidable::CMD_PROCESS_MODULES, L"ProcessManager.dll", p->pid);

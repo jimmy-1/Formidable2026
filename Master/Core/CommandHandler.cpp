@@ -307,6 +307,17 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     if (!info) return;
     memcpy(&client->info, info, sizeof(Formidable::ClientInfo));
     
+    // 如果客户端报告了公网IP，则更新IP（优先信任客户端报告的公网IP，特别是解决FRP等代理导致IP显示为127.0.0.1的问题）
+    std::string oldIP = client->ip;
+    if (client->info.publicAddr[0] != '\0') {
+        std::string reportedIP = client->info.publicAddr;
+        // 如果当前记录的IP是本地回环或内网IP，或者为空，则强制使用报告的公网IP
+        if (client->ip == "127.0.0.1" || client->ip.find("192.168.") == 0 || 
+            client->ip.find("10.") == 0 || client->ip.find("172.") == 0 || client->ip.empty()) {
+            client->ip = reportedIP;
+        }
+    }
+    
     // 同步备注和分组
     std::wstring computerName = Utils::StringHelper::UTF8ToWide(client->info.computerName);
     std::wstring userName = Utils::StringHelper::UTF8ToWide(client->info.userName);
@@ -390,8 +401,24 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     lviSet.iSubItem = 1; lviSet.pszText = (LPWSTR)wPort.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
     
-    lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)L"正在获取...";
-    SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
+    if (client->location.empty() || oldIP != client->ip) {
+        lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)L"正在获取...";
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
+
+        // 异步获取地理位置
+        std::thread([clientId, client]() {
+            std::string location = GetLocationByIP(client->ip);
+            std::wstring wLoc = Utils::StringHelper::UTF8ToWide(location);
+            
+            struct UpdateData { uint32_t id; std::wstring loc; int index; };
+            UpdateData* data = new UpdateData{ clientId, wLoc, client->listIndex };
+            
+            PostMessageW(g_hMainWnd, WM_LOC_UPDATE, 0, (LPARAM)data);
+        }).detach();
+    } else {
+        lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)client->location.c_str();
+        SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);
+    }
     
     lviSet.iSubItem = 3; lviSet.pszText = (LPWSTR)wLAN.c_str();
     SendMessageW(g_hListClients, LVM_SETITEMTEXTW, index, (LPARAM)&lviSet);

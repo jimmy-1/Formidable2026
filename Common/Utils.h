@@ -26,6 +26,7 @@ namespace Formidable {
     std::string GetExeVersion();
     std::string GetSystemUptime();
     std::string GetLocalIP();
+    std::string GetPublicIP();
     std::string GetLocationByIP(const std::string& ip);
     
     // 线程管理

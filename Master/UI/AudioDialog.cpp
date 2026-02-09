@@ -2,6 +2,7 @@
 #include "../../Common/Config.h"
 #include "../../Common/ClientTypes.h"
 #include "../resource.h"
+#include "../GlobalState.h"
 #include <map>
 #include <mutex>
 #include <vector>
@@ -47,6 +48,7 @@ INT_PTR CALLBACK AudioDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LP
         SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadIconW(GetModuleHandle(NULL), MAKEINTRESOURCEW(IDI_AUDIO)));
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(GetModuleHandle(NULL), MAKEINTRESOURCEW(IDI_AUDIO)));
         
+        ApplyModernTheme(hDlg);
         // 自动开始
         SendCmd(clientId, CMD_VOICE_STREAM, 1);
         return (INT_PTR)TRUE;

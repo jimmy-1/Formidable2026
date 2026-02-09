@@ -106,5 +106,7 @@ extern std::mutex g_HistoryHostsMutex;
 
 // 排序回调
 int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSort);
+void ApplyModernTheme(HWND hWnd);
+void ReleaseModernTheme();
 
 #endif // GLOBALSTATE_H

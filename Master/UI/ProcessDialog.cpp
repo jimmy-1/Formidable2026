@@ -10,6 +10,7 @@
 #include "../../Common/ClientTypes.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
+#include "../GlobalState.h"
 #include "../NetworkHelper.h"
 #include "../Core/CommandHandler.h"
 #include <CommCtrl.h>
@@ -38,9 +39,10 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         
         SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_PROCESS)));
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_PROCESS)));
+        ApplyModernTheme(hDlg);
         
         HWND hList = GetDlgItem(hDlg, IDC_LIST_PROCESS);
-        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+        ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;

