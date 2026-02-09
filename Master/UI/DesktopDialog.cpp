@@ -180,8 +180,18 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         case WM_MBUTTONUP:
         case WM_MBUTTONDBLCLK:
         case WM_MOUSEWHEEL: {
-            int clientX = (int)(short)LOWORD(lParam);
-            int clientY = (int)(short)HIWORD(lParam);
+            POINT pt;
+            if (message == WM_MOUSEWHEEL) {
+                pt.x = GET_X_LPARAM(lParam);
+                pt.y = GET_Y_LPARAM(lParam);
+                ScreenToClient(hWnd, &pt);
+            } else {
+                pt.x = (int)(short)LOWORD(lParam);
+                pt.y = (int)(short)HIWORD(lParam);
+            }
+
+            int clientX = pt.x;
+            int clientY = pt.y;
 
             // 区域划分逻辑：
             // 全局屏幕显示区域：用于操作远程屏幕，映射所有键盘鼠标
@@ -189,6 +199,11 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             // 如果未启用控制，直接拦截消息但不发送
             if (!state.isControlEnabled) {
                 return 0;
+            }
+
+            // 确保窗口获得焦点，以便接收键盘事件
+            if (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN) {
+                SetFocus(hWnd);
             }
 
             Formidable::RemoteMouseEvent ev = { 0 };
