@@ -14,6 +14,9 @@
 #define IDI_HELP        213
 #define IDI_HISTORY     214
 #define IDI_NETWORK     215
+#define IDI_DRIVE       216
+#define IDI_FOLDER      217
+#define IDI_COMPUTER    218
 #ifndef IDC_STATIC
 #define IDC_STATIC      -1
 #endif
@@ -224,6 +227,7 @@
 #define IDD_REGISTRY    1301
 #define IDC_TREE_REGISTRY 1302
 #define IDC_LIST_REGISTRY_VALUES 1303
+#define IDC_EDIT_REGISTRY_PATH   1304
 
 // 注册表右键菜单
 #define IDM_REG_REFRESH         1310
@@ -279,6 +283,14 @@
 #define IDC_BTN_FILE_REMOTE_REFRESH 2044
 #define IDC_STATUS_FILE_BAR         2045
 #define IDC_EDIT_FILE_SEARCH        2046
+#define IDC_STATIC_NAV_BAR          2047
+#define IDC_COMBO_NAV_PATH          2048
+#define IDC_BTN_NAV_GO              2049
+#define IDC_BTN_NAV_REFRESH         2050
+#define IDC_EDIT_NAV_SEARCH         2051
+#define IDC_TREE_NAV                2052
+#define IDC_PANEL_DRIVES            2053
+#define IDC_DRIVE_CARD_BASE         2054
 // 文件管理右键菜单
 #define IDM_FILE_REFRESH        2020
 #define IDM_FILE_UPLOAD         2021

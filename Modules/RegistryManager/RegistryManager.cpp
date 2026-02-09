@@ -64,9 +64,10 @@ std::string ListRegistryKeys(HKEY hRoot, const char* subKey) {
 
     RegCloseKey(hKey);
 
-    // 序列化: [Count:4] ([Len:4][Name])...
+    // 序列化: [Count:4] [Reserve:4] ([Len:4][Name])...
     uint32_t count = (uint32_t)keys.size();
-    size_t totalSize = 4;
+    uint32_t reserve = 0; // 以后可以用来传回一些状态
+    size_t totalSize = 8;
     for (const auto& k : keys) {
         totalSize += 4 + k.size();
     }
@@ -75,6 +76,7 @@ std::string ListRegistryKeys(HKEY hRoot, const char* subKey) {
     char* p = buffer.data();
     
     memcpy(p, &count, 4); p += 4;
+    memcpy(p, &reserve, 4); p += 4;
     for (const auto& k : keys) {
         uint32_t len = (uint32_t)k.size();
         memcpy(p, &len, 4); p += 4;

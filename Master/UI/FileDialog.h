@@ -9,6 +9,9 @@
 namespace Formidable {
 namespace UI {
 
+constexpr UINT WM_FILE_UPDATE_DRIVES = WM_APP + 301;
+constexpr UINT WM_FILE_SHOW_LIST = WM_APP + 302;
+
 /// <summary>
 /// 文件管理对话框管理器
 /// </summary>

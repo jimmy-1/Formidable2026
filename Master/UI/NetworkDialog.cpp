@@ -6,13 +6,13 @@
 #endif
 // NetworkDialog.cpp - 网络管理对话框实现
 #include "NetworkDialog.h"
+#include "ModuleDialog.h"
 #include "../../Common/ClientTypes.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
 #include "../NetworkHelper.h"
 #include "../Core/CommandHandler.h"
 #include <CommCtrl.h>
-#include <vector>
 #include <map>
 #include <mutex>
 
@@ -43,13 +43,15 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
-        lvc.pszText = (LPWSTR)L"协议";     lvc.cx = 60;  SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"本地IP";   lvc.cx = 120; SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"本地端口"; lvc.cx = 70;  SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"远程IP";   lvc.cx = 120; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"远程端口"; lvc.cx = 70;  SendMessageW(hList, LVM_INSERTCOLUMNW, 4, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"状态";     lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 5, (LPARAM)&lvc);
-        lvc.pszText = (LPWSTR)L"PID";      lvc.cx = 60;  SendMessageW(hList, LVM_INSERTCOLUMNW, 6, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"进程名";   lvc.cx = 160; SendMessageW(hList, LVM_INSERTCOLUMNW, 0, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"PID";      lvc.cx = 70;  SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"协议";     lvc.cx = 60;  SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"本地IP";   lvc.cx = 120; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"本地端口"; lvc.cx = 70;  SendMessageW(hList, LVM_INSERTCOLUMNW, 4, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"远程IP";   lvc.cx = 120; SendMessageW(hList, LVM_INSERTCOLUMNW, 5, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"远程端口"; lvc.cx = 70;  SendMessageW(hList, LVM_INSERTCOLUMNW, 6, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"状态";     lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 7, (LPARAM)&lvc);
+        lvc.pszText = (LPWSTR)L"进程目录"; lvc.cx = 260; SendMessageW(hList, LVM_INSERTCOLUMNW, 8, (LPARAM)&lvc);
         
         SendMessage(hDlg, WM_COMMAND, IDM_NET_REFRESH, 0);
         return (INT_PTR)TRUE;
@@ -69,6 +71,11 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 GetCursorPos(&pt);
                 HMENU hMenu = CreatePopupMenu();
                 AppendMenuW(hMenu, MF_STRING, IDM_NET_REFRESH, L"刷新列表(&R)");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_MODULES, L"查看DLL(&D)");
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_KILL, L"结束进程(&K)");
+                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_COPY_PATH, L"复制路径(&C)");
                 TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
                 DestroyMenu(hMenu);
             } else if (nm->code == LVN_COLUMNCLICK) {
@@ -103,18 +110,72 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         switch (LOWORD(wParam)) {
         case IDC_BTN_NET_REFRESH:
         case IDM_NET_REFRESH: {
-            Formidable::CommandPkg pkg = { 0 };
-            pkg.cmd = CMD_NETWORK_LIST;
-            
-            size_t bodySize = sizeof(Formidable::CommandPkg);
-            std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
-            Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
-            memcpy(h->flag, "FRMD26?", 7);
-            h->originLen = (int)bodySize;
-            h->totalLen = (int)sendBuf.size();
-            memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, bodySize);
-            
-            SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+            SendModuleToClient(clientId, CMD_LOAD_MODULE, L"NetworkManager.dll", CMD_NETWORK_LIST);
+            break;
+        }
+        case IDM_PROCESS_MODULES: {
+            HWND hList = GetDlgItem(hDlg, IDC_LIST_NETWORK);
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                LVITEMW lvi = { 0 };
+                lvi.mask = LVIF_PARAM;
+                lvi.iItem = selected;
+                ListView_GetItem(hList, &lvi);
+                uint32_t pid = (uint32_t)lvi.lParam;
+
+                SendModuleToClient(clientId, CMD_LOAD_MODULE, L"ProcessManager.dll", CMD_PROCESS_LIST);
+                ShowModuleDialog(hDlg, clientId, pid);
+            }
+            break;
+        }
+        case IDM_PROCESS_KILL: {
+            HWND hList = GetDlgItem(hDlg, IDC_LIST_NETWORK);
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                LVITEMW lvi = { 0 };
+                lvi.mask = LVIF_PARAM;
+                lvi.iItem = selected;
+                ListView_GetItem(hList, &lvi);
+                uint32_t pid = (uint32_t)lvi.lParam;
+
+                SendModuleToClient(clientId, CMD_LOAD_MODULE, L"ProcessManager.dll", CMD_PROCESS_LIST);
+
+                Formidable::CommandPkg pkg = { 0 };
+                pkg.cmd = CMD_PROCESS_KILL;
+                pkg.arg1 = 0;
+                pkg.arg2 = pid;
+
+                size_t bodySize = sizeof(Formidable::CommandPkg);
+                std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
+                Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
+                memcpy(h->flag, "FRMD26?", 7);
+                h->originLen = (int)bodySize;
+                h->totalLen = (int)sendBuf.size();
+                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, bodySize);
+
+                SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
+            }
+            break;
+        }
+        case IDM_PROCESS_COPY_PATH: {
+            HWND hList = GetDlgItem(hDlg, IDC_LIST_NETWORK);
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szPath[MAX_PATH];
+                ListView_GetItemText(hList, selected, 8, szPath, MAX_PATH);
+
+                if (OpenClipboard(hDlg)) {
+                    EmptyClipboard();
+                    size_t len = (wcslen(szPath) + 1) * sizeof(wchar_t);
+                    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len);
+                    if (hMem) {
+                        memcpy(GlobalLock(hMem), szPath, len);
+                        GlobalUnlock(hMem);
+                        SetClipboardData(CF_UNICODETEXT, hMem);
+                    }
+                    CloseClipboard();
+                }
+            }
             break;
         }
         }

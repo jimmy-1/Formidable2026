@@ -12,7 +12,6 @@
 #include "../../Common/Config.h"
 #include "../NetworkHelper.h"
 #include "../Core/CommandHandler.h"
-#include "../Utils/StringHelper.h"
 #include <CommCtrl.h>
 #include <vector>
 #include <map>
@@ -77,7 +76,6 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_KILL, L"结束进程(&K)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_COPY_PATH, L"复制路径(&C)");
-                AppendMenuW(hMenu, MF_STRING, IDM_PROCESS_OPEN_DIR, L"浏览目录(&O)");
                 TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hDlg, NULL);
                 DestroyMenu(hMenu);
             } else if (nm->code == LVN_COLUMNCLICK) {
@@ -203,37 +201,6 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                     }
                     CloseClipboard();
                 }
-            }
-            break;
-        }
-        case IDM_PROCESS_OPEN_DIR: {
-            HWND hList = GetDlgItem(hDlg, IDC_LIST_PROCESS);
-            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
-            if (selected >= 0) {
-                wchar_t szPath[MAX_PATH];
-                ListView_GetItemText(hList, selected, 8, szPath, MAX_PATH);
-                
-                // 使用 explorer.exe /select,"path" 在被控端定位文件
-                std::wstring wcmd = L"explorer.exe /select,\"" + std::wstring(szPath) + L"\"";
-                std::string cmd = Formidable::Utils::StringHelper::WideToUTF8(wcmd);
-
-                Formidable::CommandPkg pkg = { 0 };
-                pkg.cmd = CMD_SHELL_EXEC;
-                pkg.arg1 = (uint32_t)cmd.length();
-                
-                size_t headerSize = offsetof(Formidable::CommandPkg, data);
-                size_t bodySize = headerSize + cmd.length();
-                
-                std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
-                Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
-                memcpy(h->flag, "FRMD26?", 7);
-                h->originLen = (int)bodySize;
-                h->totalLen = (int)sendBuf.size();
-                
-                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader), &pkg, headerSize);
-                memcpy(sendBuf.data() + sizeof(Formidable::PkgHeader) + headerSize, cmd.c_str(), cmd.length());
-                
-                SendDataToClient(client, sendBuf.data(), (int)sendBuf.size());
             }
             break;
         }

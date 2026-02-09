@@ -30,6 +30,7 @@
 #include "../MainWindow.h"
 #include "../Utils/StringHelper.h"
 #include "../UI/TerminalDialog.h"
+#include "../UI/FileDialog.h"
 #include "../Server/Security/CommandValidator.h"
 #include "../Server/Utils/Logger.h"
 #include <CommCtrl.h>
@@ -821,11 +822,11 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                      rootIdx = (uint32_t)tviParent.lParam;
                  }
 
-                 // Binary Format Parsing: [Count:4] ([Len:4][Name])...
-                 if (dataLen >= 4) {
+                 // Binary Format Parsing: [Count:4] [Reserve:4] ([Len:4][Name])...
+                 if (dataLen >= 8) {
                      uint32_t count = 0;
                      memcpy(&count, pData, 4);
-                     const char* p = pData + 4;
+                     const char* p = pData + 8;
                      const char* end = pData + dataLen;
 
                      SendMessage(hTree, WM_SETREDRAW, FALSE, 0);
@@ -844,6 +845,12 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                          tvis.item.pszText = (LPWSTR)wKey.c_str();
                          tvis.item.cChildren = 1; // 假设有子项，支持展开
                          tvis.item.lParam = (LPARAM)rootIdx; // 继承根键索引
+                         if (rootIdx < 5) {
+                             tvis.item.lParam = (LPARAM)rootIdx;
+                         } else {
+                             // 如果 rootIdx 不合法（比如被误设为了索引），尝试从 hSelected 获取
+                             tvis.item.lParam = (LPARAM)(rootIdx & 0xFF); 
+                         }
                          TreeView_InsertItem(hTree, &tvis);
                      }
                      SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
@@ -923,44 +930,8 @@ void CommandHandler::HandleDriveList(uint32_t clientId, const Formidable::Comman
     }
 
     if (client->hFileDlg && IsWindow(client->hFileDlg)) {
-        HWND hList = GetDlgItem(client->hFileDlg, IDC_LIST_FILE_REMOTE);
-        ListView_DeleteAllItems(hList);
-        SendMessage(hList, WM_SETREDRAW, FALSE, 0);
-
-        std::string data(pkg->data, pkg->arg1);
-        std::stringstream ss(data);
-        std::string line;
-        int index = 0;
-
-        while (std::getline(ss, line)) {
-            if (line.empty()) continue;
-            // Name|Type
-            size_t pos = line.find('|');
-            if (pos == std::string::npos) continue;
-            
-            std::string name = line.substr(0, pos);
-            std::string type = line.substr(pos + 1);
-            
-            std::wstring wName = Utils::StringHelper::UTF8ToWide(name);
-            std::wstring wType = Utils::StringHelper::UTF8ToWide(type);
-            
-            // Icon
-            SHFILEINFOW sfi = { 0 };
-            SHGetFileInfoW(wName.c_str(), 0, &sfi, sizeof(sfi), SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
-            
-            LVITEMW lvi = { 0 };
-            lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
-            lvi.iItem = index;
-            lvi.pszText = (LPWSTR)wName.c_str();
-            lvi.iImage = sfi.iIcon;
-            lvi.lParam = index;
-            
-            int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
-            ListView_SetItemText(hList, idx, 2, (LPWSTR)wType.c_str()); // Type column
-            
-            index++;
-        }
-        SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+        std::string* payload = new std::string(pkg->data, pkg->arg1);
+        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_UPDATE_DRIVES, 0, (LPARAM)payload);
     }
 }
 
@@ -973,19 +944,26 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
     }
 
     if (client->hFileDlg && IsWindow(client->hFileDlg)) {
-        HWND hList = GetDlgItem(client->hFileDlg, IDC_LIST_FILE_REMOTE);
-        ListView_DeleteAllItems(hList);
+        HWND hDlg = client->hFileDlg;
+        HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+        bool appendMode = GetPropW(hDlg, L"FILE_SEARCH_APPEND") != NULL;
+        bool clearFirst = GetPropW(hDlg, L"FILE_SEARCH_CLEAR") != NULL;
+        if (!appendMode || clearFirst) {
+            ListView_DeleteAllItems(hList);
+            if (clearFirst) RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+        }
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
 
         std::string data(pkg->data, pkg->arg1);
         if (data == "PERMISSION_DENIED") {
             SendMessage(hList, WM_SETREDRAW, TRUE, 0);
-            MessageBoxW(client->hFileDlg, L"权限不足，无法访问该目录", L"错误", MB_ICONERROR);
+            MessageBoxW(hDlg, L"权限不足，无法访问该目录", L"错误", MB_ICONERROR);
+            PostMessageW(hDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
             return;
         }
         std::stringstream ss(data);
         std::string line;
-        int index = 0;
+        int index = ListView_GetItemCount(hList);
         int dirCount = 0;
         int fileCount = 0;
         unsigned long long totalSize = 0;
@@ -1061,7 +1039,7 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
         SendMessage(hList, WM_SETREDRAW, TRUE, 0);
 
         // 更新状态栏显示文件统计信息
-        HWND hStatusBar = GetDlgItem(client->hFileDlg, IDC_STATUS_FILE_BAR);
+        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
         if (hStatusBar) {
             wchar_t szTotalSize[64] = {0};
             if (totalSize > 1024 * 1024 * 1024)
@@ -1078,8 +1056,22 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
                       dirCount + fileCount, dirCount, fileCount, szTotalSize);
             SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
         }
+        if (appendMode) {
+            HANDLE hPending = GetPropW(hDlg, L"FILE_SEARCH_PENDING");
+            UINT_PTR pending = (UINT_PTR)hPending;
+            if (pending > 0) pending--;
+            if (pending <= 1) {
+                RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
+                RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+                RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
+            } else {
+                SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)pending);
+            }
+        }
     }
+        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
 }
+
 
 void CommandHandler::HandleProcessKill(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
     std::string status(pkg->data, pkg->arg1);
@@ -1572,7 +1564,7 @@ void CommandHandler::HandleNetworkList(uint32_t clientId, const Formidable::Comm
         if (line.empty()) continue;
         
         std::vector<std::string> tokens = Utils::StringHelper::Split(line, '|');
-        if (tokens.size() < 7) continue; // Protocol|LocalIP|LocalPort|RemoteIP|RemotePort|State|PID
+        if (tokens.size() < 7) continue;
         
         std::wstring protocol = Utils::StringHelper::UTF8ToWide(tokens[0]);
         std::wstring localIp = Utils::StringHelper::UTF8ToWide(tokens[1]);
@@ -1581,19 +1573,26 @@ void CommandHandler::HandleNetworkList(uint32_t clientId, const Formidable::Comm
         std::wstring remotePort = Utils::StringHelper::UTF8ToWide(tokens[4]);
         std::wstring state = Utils::StringHelper::UTF8ToWide(tokens[5]);
         std::wstring pid = Utils::StringHelper::UTF8ToWide(tokens[6]);
+        std::wstring procName = tokens.size() > 7 ? Utils::StringHelper::UTF8ToWide(tokens[7]) : L"";
+        std::wstring procFolder = tokens.size() > 8 ? Utils::StringHelper::UTF8ToWide(tokens[8]) : L"";
+        std::wstring procDir = tokens.size() > 8 ? Utils::StringHelper::UTF8ToWide(tokens[8]) : L"";
+        uint32_t pidValue = (uint32_t)strtoul(tokens[6].c_str(), nullptr, 10);
         
         LVITEMW lvi = { 0 };
-        lvi.mask = LVIF_TEXT;
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
         lvi.iItem = i;
-        lvi.pszText = (LPWSTR)protocol.c_str();
+        lvi.pszText = (LPWSTR)procName.c_str();
+        lvi.lParam = (LPARAM)pidValue;
         int index = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
         
-        ListView_SetItemText(hList, index, 1, (LPWSTR)localIp.c_str());
-        ListView_SetItemText(hList, index, 2, (LPWSTR)localPort.c_str());
-        ListView_SetItemText(hList, index, 3, (LPWSTR)remoteIp.c_str());
-        ListView_SetItemText(hList, index, 4, (LPWSTR)remotePort.c_str());
-        ListView_SetItemText(hList, index, 5, (LPWSTR)state.c_str());
-        ListView_SetItemText(hList, index, 6, (LPWSTR)pid.c_str());
+        ListView_SetItemText(hList, index, 1, (LPWSTR)pid.c_str());
+        ListView_SetItemText(hList, index, 2, (LPWSTR)protocol.c_str());
+        ListView_SetItemText(hList, index, 3, (LPWSTR)localIp.c_str());
+        ListView_SetItemText(hList, index, 4, (LPWSTR)localPort.c_str());
+        ListView_SetItemText(hList, index, 5, (LPWSTR)remoteIp.c_str());
+        ListView_SetItemText(hList, index, 6, (LPWSTR)remotePort.c_str());
+        ListView_SetItemText(hList, index, 7, (LPWSTR)state.c_str());
+        ListView_SetItemText(hList, index, 8, (LPWSTR)procDir.c_str());
         
         i++;
     }

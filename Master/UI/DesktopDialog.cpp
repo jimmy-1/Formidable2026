@@ -89,11 +89,16 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         if (g_Clients.count(cid)) client = g_Clients[cid];
     }
 
-    // 获取状态引用 (注意：需确保 s_desktopStates 中存在该 hDlg)
+    // 获取状态引用
     if (s_desktopStates.find(hDlg) == s_desktopStates.end()) {
         return DefSubclassProc(hWnd, message, wParam, lParam);
     }
     DesktopState& state = s_desktopStates[hDlg];
+
+    // 状态同步：确保对话框内部状态与全局 client->isMonitoring 同步
+    if (client) {
+        state.isControlEnabled = client->isMonitoring;
+    }
 
     if (message == WM_PAINT) {
         PAINTSTRUCT ps;
@@ -147,11 +152,6 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         return 0;
     }
 
-    // 拦截右键上下文菜单，防止在静态控件上弹出本地菜单
-    if (message == WM_CONTEXTMENU) {
-        return 0;
-    }
-
     // 处理鼠标和键盘事件
     if (client) {
         auto SendRemoteControl = [&](uint32_t cmd, void* data, size_t size) {
@@ -180,6 +180,16 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         case WM_MBUTTONUP:
         case WM_MBUTTONDBLCLK:
         case WM_MOUSEWHEEL: {
+            int clientX = (int)(short)LOWORD(lParam);
+            int clientY = (int)(short)HIWORD(lParam);
+
+            // 区域划分逻辑：
+            // 1. 顶部状态栏区域 (y < 40)：用于本地操作（如触发菜单），不映射到远程
+            // 2. 屏幕显示区域 (y >= 40)：用于操作远程屏幕，映射所有键盘鼠标
+            if (clientY < 40) {
+                break; // 跳出 switch，由系统处理消息（右键会触发 WM_CONTEXTMENU）
+            }
+
             // 如果未启用控制，直接拦截消息但不发送
             if (!state.isControlEnabled) {
                 return 0;
@@ -192,8 +202,6 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             
             // 计算远程坐标
             int remoteX = 0, remoteY = 0;
-            int clientX = (int)(short)LOWORD(lParam);
-            int clientY = (int)(short)HIWORD(lParam);
 
             if (state.isStretched) {
                 if (rc.right > 0 && rc.bottom > 0 && state.remoteWidth > 0 && state.remoteHeight > 0) {
@@ -222,6 +230,9 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             else if (message == WM_MBUTTONDBLCLK) ev.msg = WM_MBUTTONDOWN;
 
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
+            
+            // 重要：处理完消息后直接返回 0，不再执行 DefSubclassProc
+            // 否则系统可能会根据 RBUTTONUP 消息再次触发 WM_CONTEXTMENU
             return 0; 
         }
         case WM_KEYDOWN:
@@ -534,15 +545,33 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         return (INT_PTR)TRUE;
     }
     case WM_CONTEXTMENU: {
-        // 如果点击的是画面区域(IDC_STATIC_SCREEN)，则不显示菜单
-        HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
-        if ((HWND)wParam == hStatic) {
-            return (INT_PTR)TRUE;
+        // 获取点击位置
+        POINT pt;
+        if (lParam == -1) {
+            GetCursorPos(&pt);
+        } else {
+            pt.x = GET_X_LPARAM(lParam);
+            pt.y = GET_Y_LPARAM(lParam);
+
+            // 检查点击位置
+            POINT ptClient = pt;
+            ScreenToClient(hDlg, &ptClient);
+
+            // 1. 如果点击的是非客户区（如标题栏，y < 0），交给系统处理以弹出系统菜单
+            if (ptClient.y < 0) {
+                return (INT_PTR)FALSE; 
+            }
+
+            // 2. 如果点击的是顶部状态栏区域 (0 <= y < 40)，则弹出自定义管理菜单
+            if (ptClient.y < 40) {
+                // 继续向下执行弹出逻辑
+            } else {
+                // 3. 屏幕显示区域 (y >= 40)：拦截本地菜单弹出
+                return (INT_PTR)TRUE; 
+            }
         }
 
         DesktopState& state = s_desktopStates[hDlg];
-
-        POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         HMENU hMenu = CreatePopupMenu();
         HMENU hFpsMenu = CreatePopupMenu();
         HMENU hResMenu = CreatePopupMenu();
@@ -620,6 +649,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         switch (LOWORD(wParam)) {
         case IDM_DESKTOP_CONTROL:
             state.isControlEnabled = !state.isControlEnabled;
+            // 同步到 ConnectedClient，以便其他地方（如 main_gui.cpp）也能获取到控制状态
             client->isMonitoring = state.isControlEnabled;
             AddLog(L"桌面", state.isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制");
             break;

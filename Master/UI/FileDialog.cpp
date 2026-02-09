@@ -16,6 +16,7 @@
 #include <vector>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <shellapi.h>
 #include <thread>
 #include <fstream>
@@ -37,9 +38,19 @@ static std::map<HWND, uint64_t> s_transferLastBytes;
 static std::map<HWND, uint64_t> s_transferLastTick;
 static std::map<HWND, double> s_transferSpeedBps;
 static std::map<HWND, bool> s_dlgMonitorActive;
+static std::map<HWND, std::vector<HWND>> s_dlgDriveCards;
+static std::map<HWND, std::vector<std::wstring>> s_dlgDrivePaths;
+static std::map<HWND, std::vector<std::wstring>> s_dlgDriveNames;
+static std::map<HWND, std::vector<std::wstring>> s_dlgDriveTypes;
+static std::map<HWND, int> s_dlgDriveControlIndex;
+static std::map<HWND, bool> s_dlgShowDriveView;
 static std::mutex s_transferMutex;
 static HIMAGELIST s_hFileImageListSmall = NULL;
 static HIMAGELIST s_hFileImageListLarge = NULL;
+static HIMAGELIST s_hNavImageList = NULL;
+static int s_navIconFolder = -1;
+static int s_navIconDrive = -1;
+static int s_navIconComputer = -1;
 static const unsigned char kTransferKey[] = {
     0x3A, 0x7F, 0x12, 0x9C, 0x55, 0xE1, 0x08, 0x6D,
     0x4B, 0x90, 0x2E, 0xA7, 0x1C, 0xF3, 0xB5, 0x63
@@ -99,11 +110,12 @@ static std::wstring GetDirectoryPart(const std::wstring& full) {
     return full.substr(0, pos + 1);
 }
 
+static std::wstring GetNavPathText(HWND hDlg);
+static void SetNavPathText(HWND hDlg, const std::wstring& path);
+
 static std::wstring BuildRemoteFullPath(HWND hDlg, const std::wstring& name) {
     if (IsFullRemotePath(name)) return name;
-    wchar_t szPath[MAX_PATH] = { 0 };
-    GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-    std::wstring full = szPath;
+    std::wstring full = GetNavPathText(hDlg);
     if (full.empty()) full = L"C:\\";
     if (full.back() != L'\\') full += L'\\';
     full += name;
@@ -131,6 +143,143 @@ static std::wstring FormatDurationText(uint64_t seconds) {
     if (h > 0) swprintf_s(buf, L"%llu:%02llu:%02llu", h, m, s);
     else swprintf_s(buf, L"%02llu:%02llu", m, s);
     return buf;
+}
+
+static std::wstring FormatSizeText(uint64_t bytes) {
+    wchar_t buf[64] = { 0 };
+    if (bytes >= 1024ULL * 1024ULL * 1024ULL)
+        swprintf_s(buf, L"%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+    else if (bytes >= 1024ULL * 1024ULL)
+        swprintf_s(buf, L"%.1f MB", bytes / (1024.0 * 1024.0));
+    else if (bytes >= 1024ULL)
+        swprintf_s(buf, L"%.1f KB", bytes / 1024.0);
+    else
+        swprintf_s(buf, L"%llu B", bytes);
+    return buf;
+}
+
+static std::wstring GetNavPathText(HWND hDlg) {
+    wchar_t buf[MAX_PATH] = { 0 };
+    HWND hCombo = GetDlgItem(hDlg, IDC_COMBO_NAV_PATH);
+    if (hCombo) GetWindowTextW(hCombo, buf, MAX_PATH);
+    return buf;
+}
+
+static void SetNavPathText(HWND hDlg, const std::wstring& path) {
+    HWND hCombo = GetDlgItem(hDlg, IDC_COMBO_NAV_PATH);
+    if (!hCombo) return;
+    SetWindowTextW(hCombo, path.c_str());
+    if (!path.empty()) {
+        LRESULT idx = SendMessageW(hCombo, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)path.c_str());
+        if (idx == CB_ERR) {
+            SendMessageW(hCombo, CB_ADDSTRING, 0, (LPARAM)path.c_str());
+        }
+    }
+}
+
+static std::wstring ExtractDrivePath(const std::wstring& text) {
+    for (size_t i = 1; i < text.size(); ++i) {
+        if (text[i] == L':') {
+            wchar_t letter = text[i - 1];
+            if ((letter >= L'A' && letter <= L'Z') || (letter >= L'a' && letter <= L'z')) {
+                std::wstring path;
+                path.push_back(towupper(letter));
+                path.append(L":\\");
+                return path;
+            }
+        }
+    }
+    return L"";
+}
+
+static void UpdateDriveViewVisibility(HWND hDlg, bool showDrive) {
+    HWND hPanel = GetDlgItem(hDlg, IDC_PANEL_DRIVES);
+    HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+    if (hPanel) ShowWindow(hPanel, showDrive ? SW_SHOW : SW_HIDE);
+    if (hList) ShowWindow(hList, showDrive ? SW_HIDE : SW_SHOW);
+    s_dlgShowDriveView[hDlg] = showDrive;
+}
+
+static void ClearDriveControlIndex() {
+    for (auto it = s_dlgDriveControlIndex.begin(); it != s_dlgDriveControlIndex.end(); ) {
+        if (!IsWindow(it->first)) it = s_dlgDriveControlIndex.erase(it);
+        else ++it;
+    }
+}
+
+static void ClearDriveCards(HWND hDlg) {
+    auto& cards = s_dlgDriveCards[hDlg];
+    for (HWND hCard : cards) {
+        if (hCard) DestroyWindow(hCard);
+    }
+    cards.clear();
+    ClearDriveControlIndex();
+}
+
+static void RenderDriveCards(HWND hDlg, const std::vector<std::wstring>& names, const std::vector<std::wstring>& paths, const std::vector<std::wstring>& types) {
+    HWND hPanel = GetDlgItem(hDlg, IDC_PANEL_DRIVES);
+    if (!hPanel) return;
+
+    ClearDriveCards(hDlg);
+
+    RECT rc;
+    GetClientRect(hPanel, &rc);
+    int padding = 10;
+    int cardWidth = 220;
+    int cardHeight = 90;
+    int x = padding;
+    int y = padding;
+    int maxX = rc.right - padding;
+
+    size_t count = names.size();
+    for (size_t i = 0; i < count; ++i) {
+        if (x + cardWidth > maxX) {
+            x = padding;
+            y += cardHeight + padding;
+        }
+        std::wstring title = names[i];
+        if (i < types.size() && !types[i].empty()) {
+            title = types[i] + L" (" + names[i] + L")";
+        }
+        HWND hCard = CreateWindowExW(0, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | SS_NOTIFY, x, y, cardWidth, cardHeight, hPanel, (HMENU)(UINT_PTR)(IDC_DRIVE_CARD_BASE + (int)i), g_hInstance, NULL);
+        s_dlgDriveCards[hDlg].push_back(hCard);
+
+        HWND hIcon = CreateWindowExW(0, L"STATIC", NULL, SS_ICON | SS_NOTIFY | WS_CHILD | WS_VISIBLE, 12, 10, 32, 32, hCard, NULL, g_hInstance, NULL);
+        SendMessageW(hIcon, STM_SETIMAGE, IMAGE_ICON, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_DRIVE)));
+
+        HWND hName = CreateWindowExW(0, L"STATIC", title.c_str(), SS_NOTIFY | WS_CHILD | WS_VISIBLE, 54, 8, cardWidth - 64, 20, hCard, NULL, g_hInstance, NULL);
+
+        HWND hProgress = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 12, 44, cardWidth - 24, 10, hCard, NULL, g_hInstance, NULL);
+        SendMessageW(hProgress, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
+        SendMessageW(hProgress, PBM_SETPOS, 0, 0);
+
+        std::wstring info = L"可用: -- / 总: --";
+        HWND hInfo = CreateWindowExW(0, L"STATIC", info.c_str(), SS_NOTIFY | WS_CHILD | WS_VISIBLE, 12, 58, cardWidth - 24, 20, hCard, NULL, g_hInstance, NULL);
+
+        s_dlgDriveControlIndex[hCard] = (int)i;
+        s_dlgDriveControlIndex[hIcon] = (int)i;
+        s_dlgDriveControlIndex[hName] = (int)i;
+        s_dlgDriveControlIndex[hInfo] = (int)i;
+
+        x += cardWidth + padding;
+    }
+}
+
+static HTREEITEM ResetNavTree(HWND hDlg) {
+    HWND hTree = GetDlgItem(hDlg, IDC_TREE_NAV);
+    if (!hTree) return NULL;
+    TreeView_DeleteAllItems(hTree);
+    TVINSERTSTRUCTW tvis = { 0 };
+    tvis.hParent = TVI_ROOT;
+    tvis.hInsertAfter = TVI_LAST;
+    tvis.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+    tvis.item.pszText = (LPWSTR)L"此电脑";
+    int rootIcon = (s_navIconComputer >= 0) ? s_navIconComputer : s_navIconFolder;
+    tvis.item.iImage = rootIcon;
+    tvis.item.iSelectedImage = rootIcon;
+    HTREEITEM root = TreeView_InsertItem(hTree, &tvis);
+    TreeView_Expand(hTree, root, TVE_EXPAND);
+    return root;
 }
 
 // 文件上传后台任务
@@ -209,6 +358,29 @@ void InitFileImageList() {
     }
 }
 
+static void InitNavImageList() {
+    if (s_hNavImageList) return;
+    s_hNavImageList = ImageList_Create(16, 16, ILC_COLOR32 | ILC_MASK, 3, 3);
+    HICON hFolder = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(IDI_FOLDER), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    HICON hDrive = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(IDI_DRIVE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    HICON hComputer = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(IDI_COMPUTER), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+    if (s_hNavImageList) {
+        if (hFolder) s_navIconFolder = ImageList_AddIcon(s_hNavImageList, hFolder);
+        if (hDrive) s_navIconDrive = ImageList_AddIcon(s_hNavImageList, hDrive);
+        if (hComputer) s_navIconComputer = ImageList_AddIcon(s_hNavImageList, hComputer);
+    }
+    if (hFolder) DestroyIcon(hFolder);
+    if (hDrive) DestroyIcon(hDrive);
+    if (hComputer) DestroyIcon(hComputer);
+}
+
+static void SetFlatButton(HWND hBtn) {
+    if (!hBtn) return;
+    LONG_PTR style = GetWindowLongPtrW(hBtn, GWL_STYLE);
+    style |= BS_FLAT;
+    SetWindowLongPtrW(hBtn, GWL_STYLE, style);
+}
+
 // 获取文件图标索引
 int GetFileIconIndex(const std::wstring& fileName, bool isDirectory) {
     SHFILEINFOW sfi = { 0 };
@@ -261,14 +433,20 @@ static std::wstring GetRemoteParentPath(const std::wstring& currentPath) {
 
 static void RefreshRemoteList(HWND hDlg) {
     uint32_t clientId = s_dlgToClientId[hDlg];
-
-    wchar_t szPath[MAX_PATH] = { 0 };
-    GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-    std::string path = WideToUTF8(szPath);
+    std::wstring wPath = GetNavPathText(hDlg);
+    std::string path = WideToUTF8(wPath);
+    HWND hSearch = GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH);
+    if (hSearch) {
+        SendMessageW(hSearch, EM_SETCUEBANNER, TRUE, (LPARAM)L"搜索文件");
+    }
+    HWND hBack = GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK);
+    if (hBack) EnableWindow(hBack, !wPath.empty());
     
     if (path.empty()) {
+        UpdateDriveViewVisibility(hDlg, true);
         SendRemoteCommand(clientId, CMD_DRIVE_LIST, 0, 0);
     } else {
+        UpdateDriveViewVisibility(hDlg, false);
         if (path.back() != '\\') path += "\\";
         SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)path.size(), 0, path.c_str(), path.size());
     }
@@ -294,6 +472,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
         // 初始化文件图标
         InitFileImageList();
+        InitNavImageList();
 
         HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
         ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER);
@@ -304,6 +483,24 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
         // 启用拖放上传
         DragAcceptFiles(hDlg, TRUE);
+
+        HWND hTree = GetDlgItem(hDlg, IDC_TREE_NAV);
+        if (hTree && s_hNavImageList) {
+            TreeView_SetImageList(hTree, s_hNavImageList, TVSIL_NORMAL);
+        }
+        if (hTree) {
+            LONG_PTR style = GetWindowLongPtrW(hTree, GWL_STYLE);
+            style |= TVS_SHOWSELALWAYS;
+            SetWindowLongPtrW(hTree, GWL_STYLE, style);
+            SetWindowPos(hTree, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
+
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK));
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_MKDIR));
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_RENAME));
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_DELETE));
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_REFRESH));
+        SetFlatButton(GetDlgItem(hDlg, IDC_BTN_FILE_VIEW));
         
         LVCOLUMNW lvc = { 0 };
         lvc.mask = LVCF_TEXT | LVCF_WIDTH;
@@ -311,8 +508,12 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         lvc.pszText = (LPWSTR)L"大小";   lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 1, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"类型";   lvc.cx = 100; SendMessageW(hList, LVM_INSERTCOLUMNW, 2, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"修改时间"; lvc.cx = 150; SendMessageW(hList, LVM_INSERTCOLUMNW, 3, (LPARAM)&lvc);
-
-        SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, L"C:\\");
+        
+        SetNavPathText(hDlg, L"");
+        ResetNavTree(hDlg);
+        UpdateDriveViewVisibility(hDlg, true);
+        HWND hSearch = GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH);
+        if (hSearch) SendMessageW(hSearch, EM_SETCUEBANNER, TRUE, (LPARAM)L"搜索文件");
         
         // 创建进度条
         HWND hProg = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 
@@ -330,6 +531,68 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             RefreshRemoteList(hDlg);
         }
         break;
+    case WM_FILE_UPDATE_DRIVES: {
+        std::string* payload = (std::string*)lParam;
+        std::vector<std::wstring> paths;
+        std::vector<std::wstring> names;
+        std::vector<std::wstring> types;
+        if (payload) {
+            std::stringstream ss(*payload);
+            std::string line;
+            while (std::getline(ss, line)) {
+                if (line.empty()) continue;
+                size_t pos = line.find('|');
+                std::string name = (pos == std::string::npos) ? line : line.substr(0, pos);
+                std::string type = (pos == std::string::npos) ? "" : line.substr(pos + 1);
+                std::wstring wName = Formidable::UTF8ToWide(name);
+                std::wstring wType = Formidable::UTF8ToWide(type);
+                std::wstring path = wName;
+                if (path.size() == 2 && path[1] == L':') path += L"\\";
+                if (path.empty()) continue;
+                names.push_back(wName);
+                paths.push_back(path);
+                types.push_back(wType);
+            }
+            delete payload;
+        }
+
+        s_dlgDrivePaths[hDlg] = paths;
+        s_dlgDriveNames[hDlg] = names;
+        s_dlgDriveTypes[hDlg] = types;
+
+        HTREEITEM root = ResetNavTree(hDlg);
+        HWND hTree = GetDlgItem(hDlg, IDC_TREE_NAV);
+        if (hTree && root) {
+            for (size_t i = 0; i < names.size(); ++i) {
+                std::wstring text = names[i];
+                if (i < types.size() && !types[i].empty()) {
+                    text = types[i] + L" (" + names[i] + L")";
+                }
+                TVINSERTSTRUCTW tvis = { 0 };
+                tvis.hParent = root;
+                tvis.hInsertAfter = TVI_LAST;
+                tvis.item.mask = TVIF_TEXT | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+                tvis.item.pszText = (LPWSTR)text.c_str();
+                tvis.item.iImage = s_navIconDrive;
+                tvis.item.iSelectedImage = s_navIconDrive;
+                TreeView_InsertItem(hTree, &tvis);
+            }
+            TreeView_Expand(hTree, root, TVE_EXPAND);
+        }
+
+        UpdateDriveViewVisibility(hDlg, true);
+        RenderDriveCards(hDlg, names, paths, types);
+        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+        if (hStatusBar) {
+            wchar_t szStatus[128] = { 0 };
+            swprintf_s(szStatus, L" 设备和驱动器：%d", (int)names.size());
+            SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
+        }
+        return (INT_PTR)TRUE;
+    }
+    case WM_FILE_SHOW_LIST:
+        UpdateDriveViewVisibility(hDlg, false);
+        return (INT_PTR)TRUE;
     case WM_UPDATE_PROGRESS:
         SendDlgItemMessage(hDlg, IDC_PROGRESS_BAR, PBM_SETPOS, wParam, 0);
         {
@@ -376,10 +639,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         uint32_t clientId = s_dlgToClientId[hDlg];
         UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
 
-        wchar_t szRemotePath[MAX_PATH];
-        GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szRemotePath, MAX_PATH);
-
-        std::wstring remoteDir = szRemotePath;
+        std::wstring remoteDir = GetNavPathText(hDlg);
         if (remoteDir.empty()) remoteDir = L"C:\\";
         if (remoteDir.back() != L'\\') remoteDir += L'\\';
 
@@ -405,66 +665,89 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
 
-        int addressBarHeight = 28;
-        int toolbarHeight = 36;
+        int navHeight = 34;
+        int toolbarHeight = 34;
         int statusBarHeight = 22;
-        int bottomAreaHeight = 28;
-        int spacing = 4;
-        int margin = 6;
+        int progressHeight = 18;
+        int spacing = 8;
+        int margin = 8;
 
-        // 地址栏区域
-        int addressBarY = margin;
-        int searchBoxWidth = 50;
-        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_FILE_PATH_REMOTE), margin, addressBarY + 8, 50, 12, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_FILE_PATH_REMOTE), margin + 55, addressBarY + 4, width - margin * 2 - 120 - searchBoxWidth - 10, 20, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_GO_REMOTE), width - margin - 45 - searchBoxWidth - 10, addressBarY + 2, 42, 24, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_FILE_SEARCH), width - margin - searchBoxWidth - 2, addressBarY + 4, searchBoxWidth, 20, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_NAV_BAR), 0, 0, width, navHeight, TRUE);
 
-        // 工具栏区域
-        int toolbarY = addressBarY + addressBarHeight + spacing;
-        int toolbarBtnWidth = 60;
-        int toolbarBtnHeight = 26;
-        int toolbarBtnSpacing = 4;
+        int searchWidth = 180;
+        int comboHeight = 20;
+        int comboY = 6;
+        int comboX = margin + 2;
+        int comboWidth = 0;
+        int available = width - comboX - margin;
+        int minSearchWidth = 120;
+        int minComboWidth = 120;
+        if (available < minSearchWidth + minComboWidth + spacing) {
+            comboWidth = max(80, available - minSearchWidth - spacing);
+            searchWidth = max(80, available - comboWidth - spacing);
+        } else {
+            comboWidth = available - searchWidth - spacing;
+        }
+        MoveWindow(GetDlgItem(hDlg, IDC_COMBO_NAV_PATH), comboX, comboY, comboWidth, comboHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH), comboX + comboWidth + spacing, 6, searchWidth, comboHeight, TRUE);
+
+        int toolbarY = navHeight + spacing;
+        int toolbarBtnWidth = 62;
+        int toolbarBtnHeight = 24;
+        int toolbarBtnSpacing = 8;
         int toolbarX = margin;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_BACK), toolbarX, toolbarY + 3, toolbarBtnWidth, toolbarBtnHeight, TRUE);
         toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_MKDIR), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_MKDIR), toolbarX, toolbarY + 3, 86, toolbarBtnHeight, TRUE);
+        toolbarX += 86 + toolbarBtnSpacing;
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_RENAME), toolbarX, toolbarY + 3, toolbarBtnWidth, toolbarBtnHeight, TRUE);
         toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_RENAME), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_DELETE), toolbarX, toolbarY + 3, toolbarBtnWidth, toolbarBtnHeight, TRUE);
         toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_DELETE), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_REFRESH), toolbarX, toolbarY + 3, toolbarBtnWidth, toolbarBtnHeight, TRUE);
         toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_REMOTE_REFRESH), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
-        toolbarX += toolbarBtnWidth + toolbarBtnSpacing;
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_VIEW), toolbarX, toolbarY + 5, toolbarBtnWidth, toolbarBtnHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_BTN_FILE_VIEW), toolbarX, toolbarY + 3, toolbarBtnWidth, toolbarBtnHeight, TRUE);
 
-        // 底部区域（进度条）
-        int bottomAreaY = height - statusBarHeight - bottomAreaHeight - margin;
-        MoveWindow(GetDlgItem(hDlg, IDC_PROGRESS_BAR), margin, bottomAreaY + 7, width - margin * 2, 14, TRUE);
+        int progressY = height - statusBarHeight - progressHeight - margin;
+        MoveWindow(GetDlgItem(hDlg, IDC_PROGRESS_BAR), margin, progressY + 2, width - margin * 2, progressHeight - 4, TRUE);
 
-        // 状态栏
         HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
         MoveWindow(hStatusBar, 0, height - statusBarHeight, width, statusBarHeight, TRUE);
 
-        // 文件列表区域
         int listY = toolbarY + toolbarHeight + spacing;
-        int listHeight = bottomAreaY - listY - spacing;
+        int listHeight = progressY - listY - spacing;
         if (listHeight < 0) listHeight = 0;
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE), margin, listY, width - margin * 2, listHeight, TRUE);
+
+        int leftWidth = 220;
+        int contentX = margin;
+        int contentWidth = width - margin * 2;
+        if (contentWidth - leftWidth - spacing < 160) {
+            leftWidth = max(140, contentWidth - 160 - spacing);
+        }
+        int listX = contentX + leftWidth + spacing;
+        int listWidth = contentWidth - leftWidth - spacing;
+
+        MoveWindow(GetDlgItem(hDlg, IDC_TREE_NAV), contentX, listY, leftWidth, listHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_PANEL_DRIVES), listX, listY, listWidth, listHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE), listX, listY, listWidth, listHeight, TRUE);
 
         // 动态调整列宽
         HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
-        int listWidth = width - margin * 2 - 20;
+        int listDataWidth = listWidth - 20;
         LVCOLUMNW col = { 0 };
         col.mask = LVCF_WIDTH;
-        col.cx = (int)(listWidth * 0.40);
+        col.cx = (int)(listDataWidth * 0.40);
         SendMessageW(hList, LVM_SETCOLUMNW, 0, (LPARAM)&col);
-        col.cx = (int)(listWidth * 0.15);
+        col.cx = (int)(listDataWidth * 0.15);
         SendMessageW(hList, LVM_SETCOLUMNW, 1, (LPARAM)&col);
-        col.cx = (int)(listWidth * 0.15);
+        col.cx = (int)(listDataWidth * 0.15);
         SendMessageW(hList, LVM_SETCOLUMNW, 2, (LPARAM)&col);
-        col.cx = (int)(listWidth * 0.30);
+        col.cx = (int)(listDataWidth * 0.30);
         SendMessageW(hList, LVM_SETCOLUMNW, 3, (LPARAM)&col);
+
+        if (s_dlgShowDriveView[hDlg]) {
+            RenderDriveCards(hDlg, s_dlgDriveNames[hDlg], s_dlgDrivePaths[hDlg], s_dlgDriveTypes[hDlg]);
+        }
 
         return (INT_PTR)TRUE;
     }
@@ -523,18 +806,15 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
                 uint32_t clientId = s_dlgToClientId[hDlg];
 
-                wchar_t szPath[MAX_PATH] = { 0 };
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
+                std::wstring dir = GetNavPathText(hDlg);
                 std::wstring oldName = s_dlgRenameOldName[hDlg];
                 std::wstring oldFull;
                 std::wstring newFull;
-                std::wstring dir;
                 if (IsFullRemotePath(oldName)) {
                     dir = GetDirectoryPart(oldName);
                     oldFull = oldName;
                     newFull = dir + info->item.pszText;
                 } else {
-                    dir = szPath;
                     if (dir.empty()) dir = L"C:\\";
                     if (dir.back() != L'\\') dir += L'\\';
                     oldFull = dir + oldName;
@@ -565,34 +845,89 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
             }
+        } else if (nm->idFrom == IDC_TREE_NAV) {
+            if (nm->code == TVN_SELCHANGEDW) {
+                auto* info = (LPNMTREEVIEWW)lParam;
+                wchar_t text[MAX_PATH] = { 0 };
+                TVITEMW item = { 0 };
+                item.hItem = info->itemNew.hItem;
+                item.mask = TVIF_TEXT;
+                item.pszText = text;
+                item.cchTextMax = MAX_PATH;
+                if (TreeView_GetItem(nm->hwndFrom, &item)) {
+                    std::wstring path = ExtractDrivePath(text);
+                    if (path.empty() && wcscmp(text, L"此电脑") == 0) {
+                        TreeView_Expand(nm->hwndFrom, info->itemNew.hItem, TVE_EXPAND);
+                        SetNavPathText(hDlg, L"");
+                    } else if (!path.empty()) {
+                        SetNavPathText(hDlg, path);
+                    }
+                    RefreshRemoteList(hDlg);
+                }
+            }
         }
         break;
     }
     case WM_COMMAND: {
         uint32_t clientId = s_dlgToClientId[hDlg];
         HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+
+        if (HIWORD(wParam) == STN_CLICKED) {
+            HWND hCtrl = (HWND)lParam;
+            auto it = s_dlgDriveControlIndex.find(hCtrl);
+            if (it != s_dlgDriveControlIndex.end()) {
+                int idx = it->second;
+                if (s_dlgDrivePaths.count(hDlg) && idx >= 0 && idx < (int)s_dlgDrivePaths[hDlg].size()) {
+                    SetNavPathText(hDlg, s_dlgDrivePaths[hDlg][idx]);
+                    RefreshRemoteList(hDlg);
+                }
+                return (INT_PTR)TRUE;
+            }
+        }
         
         switch (LOWORD(wParam)) {
         case IDOK: {
+            HWND hCombo = GetDlgItem(hDlg, IDC_COMBO_NAV_PATH);
+            HWND hSearch = GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH);
+            HWND hFocus = GetFocus();
+            if (hCombo && hFocus && (hFocus == hCombo || IsChild(hCombo, hFocus))) {
+                RefreshRemoteList(hDlg);
+                break;
+            }
             wchar_t szSearch[MAX_PATH] = { 0 };
-            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_SEARCH, szSearch, MAX_PATH);
+            GetDlgItemTextW(hDlg, IDC_EDIT_NAV_SEARCH, szSearch, MAX_PATH);
             if (wcslen(szSearch) == 0) {
                 RefreshRemoteList(hDlg);
                 break;
             }
-            wchar_t szPath[MAX_PATH] = { 0 };
-            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-            std::wstring dir = szPath;
-            if (dir.empty()) dir = L"C:\\";
-            std::string payload = WideToUTF8(dir) + "|" + WideToUTF8(szSearch);
-            SendRemoteCommand(clientId, CMD_FILE_SEARCH, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+            std::vector<std::wstring> targets;
+            std::wstring dir = GetNavPathText(hDlg);
+            if (dir.empty()) {
+                if (s_dlgDrivePaths.count(hDlg)) targets = s_dlgDrivePaths[hDlg];
+            } else {
+                targets.push_back(dir);
+            }
+            if (targets.empty()) {
+                targets.push_back(L"C:\\");
+            }
+            RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
+            RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+            RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
+            if (targets.size() > 1) {
+                SetPropW(hDlg, L"FILE_SEARCH_APPEND", (HANDLE)1);
+                SetPropW(hDlg, L"FILE_SEARCH_CLEAR", (HANDLE)1);
+                SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)(ULONG_PTR)targets.size());
+            }
+            UpdateDriveViewVisibility(hDlg, false);
+            for (const auto& target : targets) {
+                std::string payload = WideToUTF8(target) + "|" + WideToUTF8(szSearch);
+                SendRemoteCommand(clientId, CMD_FILE_SEARCH, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+            }
             break;
         }
         case IDC_BTN_FILE_REMOTE_BACK: {
-            wchar_t szPath[MAX_PATH] = { 0 };
-            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-            std::wstring parent = GetRemoteParentPath(szPath);
-            SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, parent.c_str());
+            std::wstring parent = GetRemoteParentPath(GetNavPathText(hDlg));
+            SetNavPathText(hDlg, parent);
             RefreshRemoteList(hDlg);
             break;
         }
@@ -627,11 +962,13 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             s_dlgViewMode[hDlg] = 2;
             SetListViewMode(hList, 2);
             break;
-        case IDC_BTN_FILE_GO_REMOTE: {
-            RefreshRemoteList(hDlg);
+        case IDC_COMBO_NAV_PATH: {
+            if (HIWORD(wParam) == CBN_SELENDOK) {
+                RefreshRemoteList(hDlg);
+            }
             break;
         }
-        case IDC_EDIT_FILE_SEARCH: {
+        case IDC_EDIT_NAV_SEARCH: {
             break;
         }
         case IDM_FILE_REFRESH: {
@@ -649,7 +986,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 // 只要不是文件，都认为是目录/驱动器，可以进入
                 if (wcscmp(szType, L"文件") != 0) {
                     std::wstring newPath = IsFullRemotePath(szName) ? std::wstring(szName) : BuildRemoteFullPath(hDlg, szName);
-                    SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, newPath.c_str());
+                    SetNavPathText(hDlg, newPath);
 
                     RefreshRemoteList(hDlg);
                 } else {
@@ -753,10 +1090,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             ofn.lpstrFilter = L"所有文件\0*.*\0";
             ofn.Flags = OFN_FILEMUSTEXIST;
             if (GetOpenFileNameW(&ofn)) {
-                wchar_t szRemotePath[MAX_PATH];
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szRemotePath, MAX_PATH);
-
-                std::wstring remoteDir = szRemotePath;
+                std::wstring remoteDir = GetNavPathText(hDlg);
                 if (remoteDir.empty()) remoteDir = L"C:\\";
                 if (remoteDir.back() != L'\\') remoteDir += L'\\';
 
@@ -898,9 +1232,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                     }
                     SendRemoteCommand(clientId, CMD_FILE_DELETE, (uint32_t)payload.size(), 0, payload.c_str(), payload.size());
 
-                    wchar_t szPath[MAX_PATH] = { 0 };
-                    GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-                    std::string refresh = WideToUTF8(std::wstring(szPath));
+                    std::string refresh = WideToUTF8(GetNavPathText(hDlg));
                     if (refresh.empty()) refresh = "C:\\";
                     SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)refresh.size(), 0, refresh.c_str(), refresh.size());
                 }
@@ -919,10 +1251,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             if (!InputDialog::Show(hDlg, L"新建文件夹", L"文件夹名:", folderName)) break;
             if (folderName.empty()) break;
 
-            wchar_t szPath[MAX_PATH] = { 0 };
-            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-
-            std::wstring full = szPath;
+            std::wstring full = GetNavPathText(hDlg);
             if (full.empty()) full = L"C:\\";
             if (full.back() != L'\\') full += L'\\';
             full += folderName;
@@ -930,7 +1259,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             std::string rPath = WideToUTF8(full);
             SendRemoteCommand(clientId, CMD_FILE_MKDIR, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
 
-            std::string refresh = WideToUTF8(std::wstring(szPath));
+            std::string refresh = WideToUTF8(GetNavPathText(hDlg));
             if (refresh.empty()) refresh = "C:\\";
             SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)refresh.size(), 0, refresh.c_str(), refresh.size());
             break;
@@ -957,9 +1286,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         case IDM_FILE_COPY_PATH: {
             int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (selected >= 0) {
-                wchar_t szPath[MAX_PATH] = { 0 };
                 wchar_t szName[MAX_PATH] = { 0 };
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
                 ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
                 std::wstring fullPath = BuildRemoteFullPath(hDlg, szName);
                 
@@ -995,6 +1322,11 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             s_dlgViewMode.erase(hDlg);
             s_dlgRenameOldName.erase(hDlg);
             s_dlgMonitorActive.erase(hDlg);
+            ClearDriveCards(hDlg);
+            s_dlgDrivePaths.erase(hDlg);
+            s_dlgDriveNames.erase(hDlg);
+            s_dlgDriveTypes.erase(hDlg);
+            s_dlgShowDriveView.erase(hDlg);
             {
                 std::lock_guard<std::mutex> lock(s_transferMutex);
                 s_transferTotalBytes.erase(hDlg);

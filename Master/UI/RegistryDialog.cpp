@@ -71,12 +71,20 @@ static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, u
         path += pathParts[i];
     }
     
+    // 如果路径不为空，打印调试或检查
+    // OutputDebugStringA(("Registry Path: " + path + "\n").c_str());
+
     // 发送请求到服务端
     Formidable::CommandPkg pkg = { 0 };
     pkg.cmd = Formidable::CMD_REGISTRY_CTRL;
     pkg.arg1 = rootIdx; // 根键索引
     pkg.arg2 = action;  // 1=Keys, 2=Values
     
+    // 将 HTREEITEM 存储在 pkg 的保留位或作为数据一部分发送？
+    // 由于 CommandPkg 结构固定，我们可以尝试把 HTREEITEM 的低32位存入 pkg.reserve[0]
+    // 这样 CommandHandler 收到后可以直接对应到节点，解决异步乱序导致的“循环”问题
+    pkg.reserve[0] = (uint32_t)(uintptr_t)hItem;
+
     size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
     std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
     Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
@@ -97,6 +105,94 @@ static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, u
     }
 }
 
+static void JumpToRegistryPath(HWND hDlg, const std::wstring& path) {
+    if (path.empty()) return;
+
+    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
+    std::vector<std::wstring> parts;
+    size_t start = 0, end = 0;
+    while ((end = path.find(L'\\', start)) != std::wstring::npos) {
+        parts.push_back(path.substr(start, end - start));
+        start = end + 1;
+    }
+    parts.push_back(path.substr(start));
+
+    if (parts.empty()) return;
+
+    // 寻找根键
+    HTREEITEM hCurrent = TreeView_GetRoot(hTree);
+    HTREEITEM hFound = NULL;
+    while (hCurrent) {
+        wchar_t text[256];
+        TVITEMW tvi = { 0 };
+        tvi.mask = TVIF_TEXT;
+        tvi.pszText = text;
+        tvi.cchTextMax = 256;
+        tvi.hItem = hCurrent;
+        if (TreeView_GetItem(hTree, &tvi)) {
+            if (_wcsicmp(text, parts[0].c_str()) == 0) {
+                hFound = hCurrent;
+                break;
+            }
+        }
+        hCurrent = TreeView_GetNextSibling(hTree, hCurrent);
+    }
+
+    if (!hFound) return;
+
+    // 逐级向下寻找
+    for (size_t i = 1; i < parts.size(); i++) {
+        // 确保已展开并加载
+        TreeView_Expand(hTree, hFound, TVE_EXPAND);
+        
+        HTREEITEM hChild = TreeView_GetChild(hTree, hFound);
+        HTREEITEM hNextFound = NULL;
+        while (hChild) {
+            wchar_t text[256];
+            TVITEMW tvi = { 0 };
+            tvi.mask = TVIF_TEXT;
+            tvi.pszText = text;
+            tvi.cchTextMax = 256;
+            tvi.hItem = hChild;
+            if (TreeView_GetItem(hTree, &tvi)) {
+                if (_wcsicmp(text, parts[i].c_str()) == 0) {
+                    hNextFound = hChild;
+                    break;
+                }
+            }
+            hChild = TreeView_GetNextSibling(hTree, hChild);
+        }
+
+        if (hNextFound) {
+            hFound = hNextFound;
+        } else {
+            // 如果没找到，可能是还没从服务端加载。
+            // 这种情况下很难直接跳转，因为是异步的。
+            // 简单处理：停在当前已找到的最深处
+            break;
+        }
+    }
+
+    if (hFound) {
+        TreeView_SelectItem(hTree, hFound);
+        TreeView_EnsureVisible(hTree, hFound);
+    }
+}
+
+static LRESULT CALLBACK RegistryPathEditSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+    if (uMsg == WM_KEYDOWN && wParam == VK_RETURN) {
+        HWND hDlg = (HWND)dwRefData;
+        wchar_t path[1024];
+        GetWindowTextW(hWnd, path, 1024);
+        JumpToRegistryPath(hDlg, path);
+        return 0;
+    }
+    if (uMsg == WM_NCDESTROY) {
+        RemoveWindowSubclass(hWnd, RegistryPathEditSubclassProc, uIdSubclass);
+    }
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
 INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -108,6 +204,9 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
         
         HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
         HWND hList = GetDlgItem(hDlg, IDC_LIST_REGISTRY_VALUES);
+        HWND hPathEdit = GetDlgItem(hDlg, IDC_EDIT_REGISTRY_PATH);
+
+        SetWindowSubclass(hPathEdit, RegistryPathEditSubclassProc, 0, (DWORD_PTR)hDlg);
         
         ListView_SetExtendedListViewStyle(hList, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
         
@@ -149,9 +248,13 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
     case WM_SIZE: {
         RECT rc;
         GetClientRect(hDlg, &rc);
-        int width = rc.right / 3;
-        MoveWindow(GetDlgItem(hDlg, IDC_TREE_REGISTRY), 0, 0, width, rc.bottom, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_REGISTRY_VALUES), width, 0, rc.right - width, rc.bottom, TRUE);
+        int pathHeight = 24;
+        int treeWidth = rc.right / 4;
+        if (treeWidth < 150) treeWidth = 150;
+
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_REGISTRY_PATH), 0, 0, rc.right, pathHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_TREE_REGISTRY), 0, pathHeight, treeWidth, rc.bottom - pathHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_REGISTRY_VALUES), treeWidth, pathHeight, rc.right - treeWidth, rc.bottom - pathHeight, TRUE);
         return (INT_PTR)TRUE;
     }
     case WM_NOTIFY: {
@@ -162,6 +265,31 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                 LPNMTREEVIEW pnmtv = (LPNMTREEVIEW)lParam;
                 if (pnmtv->itemNew.hItem) {
                     uint32_t clientId = s_dlgToClientId[hDlg];
+                    
+                    // 更新路径输入框
+                    std::vector<std::wstring> pathParts;
+                    HTREEITEM hCurrent = pnmtv->itemNew.hItem;
+                    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
+                    while (hCurrent) {
+                        wchar_t text[256];
+                        TVITEMW tvi = { 0 };
+                        tvi.mask = TVIF_TEXT;
+                        tvi.pszText = text;
+                        tvi.cchTextMax = 256;
+                        tvi.hItem = hCurrent;
+                        if (TreeView_GetItem(hTree, &tvi)) {
+                            pathParts.push_back(text);
+                        }
+                        hCurrent = TreeView_GetParent(hTree, hCurrent);
+                    }
+                    std::reverse(pathParts.begin(), pathParts.end());
+                    std::wstring fullPath = L"";
+                    for (size_t i = 0; i < pathParts.size(); i++) {
+                        if (i > 0) fullPath += L"\\";
+                        fullPath += pathParts[i];
+                    }
+                    SetDlgItemTextW(hDlg, IDC_EDIT_REGISTRY_PATH, fullPath.c_str());
+
                     // 1. 请求值
                     SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 2);
                     

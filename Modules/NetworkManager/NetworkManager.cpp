@@ -14,15 +14,86 @@
 #include <iphlpapi.h>
 #include <sstream>
 #include <vector>
-#include <iomanip>
+#include <map>
+#include <tlhelp32.h>
 #include "../../Common/Config.h"
-#include "../../Common/Module.h"
 #include "../../Common/Utils.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 
 using namespace Formidable;
+
+struct ProcInfo {
+    std::string name;
+    std::string folder;
+    std::string dlls;
+};
+
+std::string GetProcessNameByPid(uint32_t pid) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return "";
+    PROCESSENTRY32W pe32 = { sizeof(pe32) };
+    if (Process32FirstW(snapshot, &pe32)) {
+        do {
+            if (pe32.th32ProcessID == pid) {
+                std::string name = WideToUTF8(pe32.szExeFile);
+                CloseHandle(snapshot);
+                return name;
+            }
+        } while (Process32NextW(snapshot, &pe32));
+    }
+    CloseHandle(snapshot);
+    return "";
+}
+
+std::string GetProcessPathByPid(uint32_t pid) {
+    std::string path;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pid);
+    if (hProcess) {
+        wchar_t szPath[MAX_PATH] = { 0 };
+        DWORD dwSize = MAX_PATH;
+        if (QueryFullProcessImageNameW(hProcess, 0, szPath, &dwSize)) {
+            path = WideToUTF8(szPath);
+        }
+        CloseHandle(hProcess);
+    }
+    return path;
+}
+
+std::string GetProcessFolderFromPath(const std::string& path) {
+    size_t pos = path.find_last_of("\\/");
+    if (pos == std::string::npos) return path;
+    return path.substr(0, pos);
+}
+
+std::string GetProcessModulesByPid(uint32_t pid, size_t maxCount) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (snapshot == INVALID_HANDLE_VALUE) return "";
+    MODULEENTRY32W me32 = { sizeof(me32) };
+    std::vector<std::string> names;
+    bool truncated = false;
+    if (Module32FirstW(snapshot, &me32)) {
+        do {
+            names.push_back(WideToUTF8(me32.szModule));
+            if (names.size() >= maxCount) {
+                truncated = true;
+                break;
+            }
+        } while (Module32NextW(snapshot, &me32));
+    }
+    CloseHandle(snapshot);
+    if (names.empty()) return "";
+    std::string result;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (i > 0) result.append(",");
+        result.append(names[i]);
+    }
+    if (truncated) {
+        result.append(",...");
+    }
+    return result;
+}
 
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     PkgHeader header;
@@ -45,6 +116,7 @@ void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
 
 std::string ListConnections() {
     std::stringstream ss;
+    std::map<uint32_t, ProcInfo> procCache;
     
     // TCP
     PMIB_TCPTABLE_OWNER_PID pTcpTable;
@@ -79,9 +151,23 @@ std::string ListConnections() {
                     case MIB_TCP_STATE_DELETE_TCB: state = "DELETE_TCB"; break;
                 }
                 
+                uint32_t pid = pTcpTable->table[i].dwOwningPid;
+                auto it = procCache.find(pid);
+                if (it == procCache.end()) {
+                    ProcInfo info;
+                    info.name = GetProcessNameByPid(pid);
+                    std::string fullPath = GetProcessPathByPid(pid);
+                    info.folder = GetProcessFolderFromPath(fullPath);
+                    info.dlls = GetProcessModulesByPid(pid, 30);
+                    if (info.name.empty()) info.name = "Unknown";
+                    if (info.folder.empty()) info.folder = "-";
+                    if (info.dlls.empty()) info.dlls = "-";
+                    it = procCache.emplace(pid, info).first;
+                }
+
                 ss << "TCP|" << localIp << "|" << ntohs((u_short)pTcpTable->table[i].dwLocalPort) << "|"
                    << remoteIp << "|" << ntohs((u_short)pTcpTable->table[i].dwRemotePort) << "|"
-                   << state << "|" << pTcpTable->table[i].dwOwningPid << "\n";
+                   << state << "|" << pid << "|" << it->second.name << "|" << it->second.folder << "|" << it->second.dlls << "\n";
             }
         }
         free(pTcpTable);
@@ -100,9 +186,23 @@ std::string ListConnections() {
                 addr.S_un.S_addr = pUdpTable->table[i].dwLocalAddr;
                 inet_ntop(AF_INET, &addr, localIp, 32);
                 
+                uint32_t pid = pUdpTable->table[i].dwOwningPid;
+                auto it = procCache.find(pid);
+                if (it == procCache.end()) {
+                    ProcInfo info;
+                    info.name = GetProcessNameByPid(pid);
+                    std::string fullPath = GetProcessPathByPid(pid);
+                    info.folder = GetProcessFolderFromPath(fullPath);
+                    info.dlls = GetProcessModulesByPid(pid, 30);
+                    if (info.name.empty()) info.name = "Unknown";
+                    if (info.folder.empty()) info.folder = "-";
+                    if (info.dlls.empty()) info.dlls = "-";
+                    it = procCache.emplace(pid, info).first;
+                }
+
                 ss << "UDP|" << localIp << "|" << ntohs((u_short)pUdpTable->table[i].dwLocalPort) << "|"
                    << "*|*|" // Remote IP/Port unknown for UDP listener
-                   << "N/A|" << pUdpTable->table[i].dwOwningPid << "\n";
+                   << "N/A|" << pid << "|" << it->second.name << "|" << it->second.folder << "|" << it->second.dlls << "\n";
             }
         }
         free(pUdpTable);
