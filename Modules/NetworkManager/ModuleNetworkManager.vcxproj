@@ -60,7 +60,7 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <IntDir>$(ProjectDir)Intermediate\$(Configuration)\$(Platform)\</IntDir>
-    <TargetName>ModuleNetworkManager</TargetName>
+    <TargetName>NetworkManager</TargetName>
     <OutDir Condition="'$(Platform)'=='Win32'">$(SolutionDir)Formidable2026\x86\</OutDir>
     <OutDir Condition="'$(Platform)'=='x64'">$(SolutionDir)Formidable2026\x64\</OutDir>
   </PropertyGroup>

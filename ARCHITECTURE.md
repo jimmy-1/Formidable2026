@@ -2,7 +2,7 @@
 
 ## 1. 系统概览
 
-Formidable2026 是一个基于 Windows 平台的高性能远程管理系统（RAT），采用 C++17 标准开发。项目设计注重模块化、隐蔽性和高性能，支持多种加载方式（EXE, DLL, ShellCode, PowerShell）和丰富的功能模块。
+Formidable2026 是一个基于 Windows 平台的高性能远程管理系统（RAT），采用 C++17 标准开发。项目设计注重模块化、隐蔽性和高性能，支持 EXE 加载方式和丰富的功能模块。
 
 ### 核心设计理念
 *   **模块化**: 核心功能与扩展功能分离，支持动态加载/卸载 DLL 模块。
@@ -23,7 +23,7 @@ graph TD
     Internet --> Client[被控端 (Client)]
     
     subgraph ClientSide [被控端架构]
-        Loader[启动器 (EXE/DLL/ShellCode)] --> Core[核心引擎 (ClientCore)]
+        Loader[启动器 (EXE)] --> Core[核心引擎 (ClientCore)]
         Core --> Network[网络模块]
         Core --> TaskMgr[任务调度]
         Core --> ModMgr[模块管理器]
@@ -42,8 +42,6 @@ graph TD
 E:\GITHUB\FORMIDABLE2026
 ├─ClientSide        # [被控端] 组件集合
 │  ├─Client         # 标准 EXE 启动器工程
-│  ├─ClientDLL      # DLL 版本启动器工程 (用于劫持/侧加载)
-│  └─Loaders        # 其他加载器 (ShellCode, PowerShell)
 ├─Common            # [公共库] 核心逻辑与定义
 │  ├─ClientCore.cpp # 被控端核心逻辑实现 (所有Loader共用)
 │  ├─Config.h       # 全局配置与命令枚举
@@ -149,11 +147,9 @@ public:
 ## 5. 核心组件详解
 
 ### 5.1 ClientSide (被控端)
-*   **ClientCore**: 实现了网络连接维护、心跳包发送、指令分发逻辑。它是所有 Loader 的静态链接库。
-*   **Loaders**:
+*   **ClientCore**: 实现了网络连接维护、心跳包发送、指令分发逻辑。它是启动器的静态链接库。
+*   **启动器**:
     *   `Client (EXE)`: 标准 Windows 可执行文件，支持自启动安装。
-    *   `ClientDLL`: 导出特定函数的 DLL，可用于 DLL 侧加载 (Side-Loading) 攻击。
-    *   `ShellCode`: 提取核心汇编代码，可注入到其他进程运行。
 
 ### 5.2 Master (主控端)
 *   **GUI**: 使用原生 Win32 API 构建的高效图形界面。

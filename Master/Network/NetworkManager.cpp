@@ -90,7 +90,7 @@ bool NetworkManager::Initialize(int port) {
     
     AddLog(L"系统", L"网络服务已启动，监听端口: " + std::to_wstring(port));
     
-    // 启动 HTTP 服务 (用于 Dropper 下载)
+    // 启动 HTTP 服务 (用于客户端下载)
     InitializeHttpServer(g_Settings.frpDownloadPort > 0 ? g_Settings.frpDownloadPort : port + 1);
 
     // 启动 FRP

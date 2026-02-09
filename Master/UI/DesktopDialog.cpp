@@ -147,7 +147,13 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         return 0;
     }
 
-    if (client && client->isMonitoring) {
+    // 拦截右键上下文菜单，防止在静态控件上弹出本地菜单
+    if (message == WM_CONTEXTMENU) {
+        return 0;
+    }
+
+    // 处理鼠标和键盘事件
+    if (client) {
         auto SendRemoteControl = [&](uint32_t cmd, void* data, size_t size) {
             size_t bodySize = sizeof(Formidable::CommandPkg) - 1 + size;
             std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
@@ -174,6 +180,11 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
         case WM_MBUTTONUP:
         case WM_MBUTTONDBLCLK:
         case WM_MOUSEWHEEL: {
+            // 如果未启用控制，直接拦截消息但不发送
+            if (!state.isControlEnabled) {
+                return 0;
+            }
+
             Formidable::RemoteMouseEvent ev = { 0 };
             ev.msg = message;
             RECT rc;
@@ -186,24 +197,18 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
 
             if (state.isStretched) {
                 if (rc.right > 0 && rc.bottom > 0 && state.remoteWidth > 0 && state.remoteHeight > 0) {
-                    // 拉伸模式：按比例映射
                     remoteX = clientX * state.remoteWidth / rc.right;
                     remoteY = clientY * state.remoteHeight / rc.bottom;
                 }
             } else {
-                // 原始模式：加上滚动偏移
                 remoteX = clientX + state.scrollX;
                 remoteY = clientY + state.scrollY;
             }
 
-            // 归一化坐标 0-65535 (Formidable 协议要求)
-            // 注意：SimpleRemoter 使用绝对坐标或归一化坐标取决于实现。
-            // 这里我们保持 Formidable 原有的归一化逻辑，但使用正确的 remoteWidth/Height 作为基准
             if (state.remoteWidth > 0 && state.remoteHeight > 0) {
                 ev.x = remoteX * 65535 / state.remoteWidth;
                 ev.y = remoteY * 65535 / state.remoteHeight;
             } else {
-                // 兜底：如果还没收到画面，可能无法正确计算，暂且用窗口比例
                 if (rc.right > 0 && rc.bottom > 0) {
                     ev.x = clientX * 65535 / rc.right;
                     ev.y = clientY * 65535 / rc.bottom;
@@ -212,23 +217,27 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
 
             if (message == WM_MOUSEWHEEL) ev.data = (short)HIWORD(wParam);
 
-            // Map double clicks to down events for compatibility with SendInput
             if (message == WM_LBUTTONDBLCLK) ev.msg = WM_LBUTTONDOWN;
             else if (message == WM_RBUTTONDBLCLK) ev.msg = WM_RBUTTONDOWN;
             else if (message == WM_MBUTTONDBLCLK) ev.msg = WM_MBUTTONDOWN;
 
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
-            return 0; // 阻止默认处理，避免出现本地右键菜单等问题
+            return 0; 
         }
         case WM_KEYDOWN:
         case WM_SYSKEYDOWN:
         case WM_KEYUP:
         case WM_SYSKEYUP: {
-             Formidable::RemoteKeyEvent ev = { 0 };
-             ev.msg = message;
-             ev.vk = (uint32_t)wParam;
-             SendRemoteControl(Formidable::CMD_KEY_EVENT, &ev, sizeof(Formidable::RemoteKeyEvent));
-             return 0;
+            // 如果未启用控制，直接拦截消息但不发送
+            if (!state.isControlEnabled) {
+                return 0;
+            }
+
+            Formidable::RemoteKeyEvent ev = { 0 };
+            ev.msg = message;
+            ev.vk = (uint32_t)wParam;
+            SendRemoteControl(Formidable::CMD_KEY_EVENT, &ev, sizeof(Formidable::RemoteKeyEvent));
+            return 0;
         }
         }
     }
@@ -271,7 +280,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             if (g_Clients.count(clientId)) client = g_Clients[clientId];
         }
         if (client) {
-            client->isMonitoring = true;
+            client->isMonitoring = false; // 初始禁用控制
             client->hDesktopDlg = hDlg;
             
             // 设置默认标题
@@ -612,7 +621,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         case IDM_DESKTOP_CONTROL:
             state.isControlEnabled = !state.isControlEnabled;
             client->isMonitoring = state.isControlEnabled;
-            // MessageBoxW(hDlg, state.isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制", L"提示", MB_OK);
+            AddLog(L"桌面", state.isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制");
             break;
             
         case IDM_DESKTOP_FULLSCREEN: {

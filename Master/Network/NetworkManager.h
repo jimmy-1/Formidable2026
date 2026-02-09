@@ -40,7 +40,7 @@ public:
     static void OnReceive(CONNID connId, const BYTE* pData, int iLength);
     static void OnClose(CONNID connId);
 
-    // HTTP Server 相关 (用于 Dropper 下载)
+    // HTTP Server 相关 (用于客户端下载)
     static bool InitializeHttpServer(int port);
     static void ShutdownHttpServer();
 

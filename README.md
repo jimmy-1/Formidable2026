@@ -13,7 +13,7 @@
 ## ✨ 功能特性
 
 ### 核心功能
-*   **多启动模式**: 支持 EXE、DLL、ShellCode、PowerShell 等多种加载方式。
+*   **多启动模式**: 支持 EXE 启动方式。
 *   **高并发通信**: 基于 IOCP (HPSocket) 模型，稳定支持数千台设备同时在线。
 *   **无文件落地**: 核心功能模块采用反射式 DLL 注入（Reflective DLL Injection）技术，全内存执行。
 *   **通信加密**: 支持 AES/RSA 加密传输，抗流量分析。
@@ -36,8 +36,6 @@
 Formidable2026/
 ├── ClientSide/         # [被控端] 核心组件
 │   ├── Client/         # 标准 EXE 启动器
-│   ├── ClientDLL/      # DLL 劫持/侧加载启动器
-│   └── Loaders/        # ShellCode/PowerShell 加载器
 ├── Common/             # [公共库] 协议定义、加密算法、工具类
 ├── Master/             # [主控端] 管理控制台 (GUI)
 ├── Modules/            # [功能模块] 动态加载的插件 (DLLs)

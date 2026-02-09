@@ -32,8 +32,21 @@ namespace UI {
 static std::map<HWND, uint32_t> s_dlgToClientId;
 static std::map<HWND, int> s_dlgViewMode; // 1=列表(详细), 2=图标
 static std::map<HWND, std::wstring> s_dlgRenameOldName;
+static std::map<HWND, uint64_t> s_transferTotalBytes;
+static std::map<HWND, uint64_t> s_transferLastBytes;
+static std::map<HWND, uint64_t> s_transferLastTick;
+static std::map<HWND, double> s_transferSpeedBps;
+static std::map<HWND, bool> s_dlgMonitorActive;
+static std::mutex s_transferMutex;
 static HIMAGELIST s_hFileImageListSmall = NULL;
 static HIMAGELIST s_hFileImageListLarge = NULL;
+static const unsigned char kTransferKey[] = {
+    0x3A, 0x7F, 0x12, 0x9C, 0x55, 0xE1, 0x08, 0x6D,
+    0x4B, 0x90, 0x2E, 0xA7, 0x1C, 0xF3, 0xB5, 0x63
+};
+static const uint32_t kEncryptFlag = 0x80000000u;
+static const bool kEnableFileTransferEncrypt = true;
+static const uint64_t kDownloadChunkSize = 64 * 1024;
 
 #define WM_UPDATE_PROGRESS (WM_USER + 201)
 #define IDC_PROGRESS_BAR 1099
@@ -63,6 +76,63 @@ static void SendRemoteCommand(uint32_t clientId, uint32_t cmd, uint32_t arg1, ui
     SendDataToClient(client, buffer.data(), (int)buffer.size());
 }
 
+static void XorCryptBuffer(char* data, int len, uint32_t chunkIndex) {
+    if (!data || len <= 0) return;
+    uint32_t seed = chunkIndex * 2654435761u;
+    size_t keyLen = sizeof(kTransferKey);
+    for (int i = 0; i < len; ++i) {
+        unsigned char k = kTransferKey[(i + seed) % keyLen];
+        unsigned char s = (unsigned char)((seed >> ((i & 3) * 8)) & 0xFF);
+        data[i] = (char)(data[i] ^ (k ^ s));
+    }
+}
+
+static bool IsFullRemotePath(const std::wstring& path) {
+    if (path.size() >= 2 && path[1] == L':') return true;
+    if (path.size() >= 2 && path[0] == L'\\' && path[1] == L'\\') return true;
+    return false;
+}
+
+static std::wstring GetDirectoryPart(const std::wstring& full) {
+    size_t pos = full.find_last_of(L"\\/");
+    if (pos == std::wstring::npos) return L"";
+    return full.substr(0, pos + 1);
+}
+
+static std::wstring BuildRemoteFullPath(HWND hDlg, const std::wstring& name) {
+    if (IsFullRemotePath(name)) return name;
+    wchar_t szPath[MAX_PATH] = { 0 };
+    GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
+    std::wstring full = szPath;
+    if (full.empty()) full = L"C:\\";
+    if (full.back() != L'\\') full += L'\\';
+    full += name;
+    return full;
+}
+
+static std::wstring FormatSpeedText(double bps) {
+    wchar_t buf[64] = { 0 };
+    if (bps >= 1024.0 * 1024.0 * 1024.0)
+        swprintf_s(buf, L"%.2f GB/s", bps / (1024.0 * 1024.0 * 1024.0));
+    else if (bps >= 1024.0 * 1024.0)
+        swprintf_s(buf, L"%.2f MB/s", bps / (1024.0 * 1024.0));
+    else if (bps >= 1024.0)
+        swprintf_s(buf, L"%.2f KB/s", bps / 1024.0);
+    else
+        swprintf_s(buf, L"%.0f B/s", bps);
+    return buf;
+}
+
+static std::wstring FormatDurationText(uint64_t seconds) {
+    uint64_t h = seconds / 3600;
+    uint64_t m = (seconds % 3600) / 60;
+    uint64_t s = seconds % 60;
+    wchar_t buf[32] = { 0 };
+    if (h > 0) swprintf_s(buf, L"%llu:%02llu:%02llu", h, m, s);
+    else swprintf_s(buf, L"%02llu:%02llu", m, s);
+    return buf;
+}
+
 // 文件上传后台任务
 static void SendFileTask(HWND hDlg, uint32_t clientId, std::wstring localPath, std::wstring remotePath) {
     std::shared_ptr<ConnectedClient> client;
@@ -81,32 +151,49 @@ static void SendFileTask(HWND hDlg, uint32_t clientId, std::wstring localPath, s
 
     // 2. 发送数据块
     std::ifstream file(localPath, std::ios::binary);
+    uint64_t finalSent = 0;
     if (file.is_open()) {
         // 获取文件大小
         file.seekg(0, std::ios::end);
         int64_t totalSize = (int64_t)file.tellg();
         file.seekg(0, std::ios::beg);
         int64_t totalSent = 0;
+        {
+            std::lock_guard<std::mutex> lock(s_transferMutex);
+            s_transferTotalBytes[hDlg] = (totalSize > 0) ? (uint64_t)totalSize : 0;
+            s_transferLastBytes[hDlg] = 0;
+            s_transferLastTick[hDlg] = GetTickCount64();
+            s_transferSpeedBps[hDlg] = 0.0;
+        }
 
         char buf[16384]; // 16KB 块
+        uint32_t chunkIndex = 0;
         while (file.read(buf, sizeof(buf)) || (file.gcount() > 0)) {
-            SendRemoteCommand(clientId, CMD_FILE_DATA, (uint32_t)file.gcount(), 0, buf, (size_t)file.gcount());
+            int len = (int)file.gcount();
+            uint32_t arg2 = 0;
+            if (kEnableFileTransferEncrypt) {
+                XorCryptBuffer(buf, len, chunkIndex);
+                arg2 = kEncryptFlag | chunkIndex;
+            }
+            SendRemoteCommand(clientId, CMD_FILE_DATA, (uint32_t)len, arg2, buf, (size_t)len);
+            chunkIndex++;
             
-            totalSent += (int64_t)file.gcount();
+            totalSent += (int64_t)len;
             if (totalSize > 0) {
                 int progress = (int)((totalSent * 100) / totalSize);
-                PostMessageW(hDlg, WM_UPDATE_PROGRESS, progress, 0);
+                PostMessageW(hDlg, WM_UPDATE_PROGRESS, progress, (LPARAM)totalSent);
             }
 
             // 简单控流，防止消息队列缓冲区满
             Sleep(10);
         }
         file.close();
+        if (totalSent > 0) finalSent = (uint64_t)totalSent;
     }
 
     // 3. 结束上传 (arg2=1)
     SendRemoteCommand(clientId, CMD_FILE_UPLOAD, 0, 1);
-    PostMessageW(hDlg, WM_UPDATE_PROGRESS, 100, 0);
+    PostMessageW(hDlg, WM_UPDATE_PROGRESS, 100, (LPARAM)finalSent);
 }
 
 // 初始化文件图标列表
@@ -193,6 +280,14 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         uint32_t clientId = (uint32_t)lParam;
         s_dlgToClientId[hDlg] = clientId;
         s_dlgViewMode[hDlg] = 1; // 默认：列表(报表)
+        s_dlgMonitorActive[hDlg] = false;
+        {
+            std::lock_guard<std::mutex> lock(s_transferMutex);
+            s_transferTotalBytes[hDlg] = 0;
+            s_transferLastBytes[hDlg] = 0;
+            s_transferLastTick[hDlg] = GetTickCount64();
+            s_transferSpeedBps[hDlg] = 0.0;
+        }
 
         SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_FILE)));
         SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)LoadIconW(g_hInstance, MAKEINTRESOURCEW(IDI_FILE)));
@@ -237,6 +332,44 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         break;
     case WM_UPDATE_PROGRESS:
         SendDlgItemMessage(hDlg, IDC_PROGRESS_BAR, PBM_SETPOS, wParam, 0);
+        {
+            HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+            if (hStatusBar) {
+                uint64_t bytes = (uint64_t)lParam;
+                double speed = 0.0;
+                uint64_t totalBytes = 0;
+                uint64_t remainSec = 0;
+                {
+                    std::lock_guard<std::mutex> lock(s_transferMutex);
+                    uint64_t now = GetTickCount64();
+                    uint64_t lastTick = s_transferLastTick[hDlg];
+                    uint64_t lastBytes = s_transferLastBytes[hDlg];
+                    if (bytes > 0 && lastTick > 0 && now > lastTick && bytes >= lastBytes) {
+                        speed = (double)(bytes - lastBytes) * 1000.0 / (double)(now - lastTick);
+                        s_transferSpeedBps[hDlg] = speed;
+                    } else {
+                        speed = s_transferSpeedBps[hDlg];
+                    }
+                    s_transferLastTick[hDlg] = now;
+                    s_transferLastBytes[hDlg] = bytes;
+                    totalBytes = s_transferTotalBytes[hDlg];
+                }
+                if (totalBytes > bytes && speed > 0.0) {
+                    remainSec = (uint64_t)((double)(totalBytes - bytes) / speed);
+                }
+                std::wstring speedText = FormatSpeedText(speed);
+                std::wstring remainText = FormatDurationText(remainSec);
+                wchar_t szProgress[256] = {0};
+                if (totalBytes > 0 && speed > 0.0) {
+                    swprintf_s(szProgress, L"传输进度: %d%% | 速度: %s | 剩余: %s", (int)wParam, speedText.c_str(), remainText.c_str());
+                } else if (speed > 0.0) {
+                    swprintf_s(szProgress, L"传输进度: %d%% | 速度: %s", (int)wParam, speedText.c_str());
+                } else {
+                    swprintf_s(szProgress, L"传输进度: %d%%", (int)wParam);
+                }
+                SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szProgress);
+            }
+        }
         return (INT_PTR)TRUE;
     case WM_DROPFILES: {
         HDROP hDrop = (HDROP)wParam;
@@ -345,6 +478,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
                 HMENU hMenu = CreatePopupMenu();
                 HMENU hViewMenu = CreatePopupMenu();
+                bool monitorActive = s_dlgMonitorActive[hDlg];
 
                 AppendMenuW(hViewMenu, MF_STRING | (s_dlgViewMode[hDlg] == 1 ? MF_CHECKED : 0), IDM_FILE_VIEW_LIST, L"列表");
                 AppendMenuW(hViewMenu, MF_STRING | (s_dlgViewMode[hDlg] == 2 ? MF_CHECKED : 0), IDM_FILE_VIEW_ICON, L"图标");
@@ -354,6 +488,9 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"打开(&O)");
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXECUTE, L"远程执行(&E)");
+                AppendMenuW(hMenu, MF_STRING, IDM_FILE_PREVIEW, L"预览(&P)");
+                AppendMenuW(hMenu, MF_STRING, IDM_FILE_HISTORY, L"历史记录(&H)");
+                AppendMenuW(hMenu, MF_STRING, IDM_FILE_MONITOR, monitorActive ? L"停止监控(&T)" : L"开始监控(&T)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_UPLOAD, L"上传文件(&U)");
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_DOWNLOAD, L"下载文件(&D)");
@@ -361,6 +498,8 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_NEW_FOLDER, L"新建文件夹(&N)");
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_RENAME, L"重命名(&M)");
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_DELETE, L"删除(&L)");
+                AppendMenuW(hMenu, MF_STRING, IDM_FILE_COMPRESS, L"压缩(&Z)");
+                AppendMenuW(hMenu, MF_STRING, IDM_FILE_UNCOMPRESS, L"解压(&J)");
                 AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_COPY_PATH, L"复制路径(&C)");
                 AppendMenuW(hMenu, MF_STRING, IDM_FILE_PROPERTIES, L"属性(&P)");
@@ -386,12 +525,21 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
                 wchar_t szPath[MAX_PATH] = { 0 };
                 GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-                std::wstring dir = szPath;
-                if (dir.empty()) dir = L"C:\\";
-                if (dir.back() != L'\\') dir += L'\\';
-
-                std::wstring oldFull = dir + s_dlgRenameOldName[hDlg];
-                std::wstring newFull = dir + info->item.pszText;
+                std::wstring oldName = s_dlgRenameOldName[hDlg];
+                std::wstring oldFull;
+                std::wstring newFull;
+                std::wstring dir;
+                if (IsFullRemotePath(oldName)) {
+                    dir = GetDirectoryPart(oldName);
+                    oldFull = oldName;
+                    newFull = dir + info->item.pszText;
+                } else {
+                    dir = szPath;
+                    if (dir.empty()) dir = L"C:\\";
+                    if (dir.back() != L'\\') dir += L'\\';
+                    oldFull = dir + oldName;
+                    newFull = dir + info->item.pszText;
+                }
 
                 std::string payload = WideToUTF8(oldFull) + "|" + WideToUTF8(newFull);
                 SendRemoteCommand(clientId, CMD_FILE_RENAME, (uint32_t)payload.size(), 0, payload.c_str(), payload.size());
@@ -425,6 +573,21 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
         
         switch (LOWORD(wParam)) {
+        case IDOK: {
+            wchar_t szSearch[MAX_PATH] = { 0 };
+            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_SEARCH, szSearch, MAX_PATH);
+            if (wcslen(szSearch) == 0) {
+                RefreshRemoteList(hDlg);
+                break;
+            }
+            wchar_t szPath[MAX_PATH] = { 0 };
+            GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
+            std::wstring dir = szPath;
+            if (dir.empty()) dir = L"C:\\";
+            std::string payload = WideToUTF8(dir) + "|" + WideToUTF8(szSearch);
+            SendRemoteCommand(clientId, CMD_FILE_SEARCH, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+            break;
+        }
         case IDC_BTN_FILE_REMOTE_BACK: {
             wchar_t szPath[MAX_PATH] = { 0 };
             GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
@@ -469,30 +632,6 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             break;
         }
         case IDC_EDIT_FILE_SEARCH: {
-            if (HIWORD(wParam) == EN_CHANGE) {
-                HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
-                wchar_t szSearch[MAX_PATH] = { 0 };
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_SEARCH, szSearch, MAX_PATH);
-
-                size_t searchLen = wcslen(szSearch);
-
-                if (searchLen == 0) {
-                    RefreshRemoteList(hDlg);
-                    break;
-                }
-
-                int itemCount = ListView_GetItemCount(hList);
-                for (int i = 0; i < itemCount; i++) {
-                    wchar_t szName[MAX_PATH] = { 0 };
-                    ListView_GetItemText(hList, i, 0, szName, MAX_PATH);
-
-                    if (_wcsnicmp(szName, szSearch, searchLen) != 0) {
-                        ListView_DeleteItem(hList, i);
-                        i--;
-                        itemCount--;
-                    }
-                }
-            }
             break;
         }
         case IDM_FILE_REFRESH: {
@@ -509,16 +648,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
 
                 // 只要不是文件，都认为是目录/驱动器，可以进入
                 if (wcscmp(szType, L"文件") != 0) {
-                    wchar_t szPath[MAX_PATH] = { 0 };
-                    GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-                    std::wstring newPath = szPath;
-                    
-                    if (newPath.empty()) {
-                        newPath = szName;
-                    } else {
-                        if (newPath.back() != L'\\') newPath += L'\\';
-                        newPath += szName;
-                    }
+                    std::wstring newPath = IsFullRemotePath(szName) ? std::wstring(szName) : BuildRemoteFullPath(hDlg, szName);
                     SetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, newPath.c_str());
 
                     RefreshRemoteList(hDlg);
@@ -537,15 +667,56 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 ListView_GetItemText(hList, selected, 2, szType, MAX_PATH);
                 if (wcscmp(szType, L"文件夹") == 0) break;
 
-                wchar_t szPath[MAX_PATH] = { 0 };
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-                std::wstring full = szPath;
-                if (full.empty()) full = L"C:\\";
-                if (full.back() != L'\\') full += L'\\';
-                full += szName;
+                std::wstring full = BuildRemoteFullPath(hDlg, szName);
 
                 std::string rPath = WideToUTF8(full);
                 SendRemoteCommand(clientId, CMD_FILE_RUN, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
+            }
+            break;
+        }
+        case IDM_FILE_PREVIEW: {
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szName[MAX_PATH] = { 0 };
+                wchar_t szType[MAX_PATH] = { 0 };
+                ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
+                ListView_GetItemText(hList, selected, 2, szType, MAX_PATH);
+                if (wcscmp(szType, L"文件") != 0) {
+                    MessageBoxW(hDlg, L"仅支持预览文件", L"提示", MB_OK | MB_ICONINFORMATION);
+                    break;
+                }
+                std::wstring full = BuildRemoteFullPath(hDlg, szName);
+                std::string rPath = WideToUTF8(full);
+                SendRemoteCommand(clientId, CMD_FILE_PREVIEW, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
+            }
+            break;
+        }
+        case IDM_FILE_HISTORY: {
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szName[MAX_PATH] = { 0 };
+                ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
+                std::wstring full = BuildRemoteFullPath(hDlg, szName);
+                std::string rPath = WideToUTF8(full);
+                SendRemoteCommand(clientId, CMD_FILE_HISTORY, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
+            }
+            break;
+        }
+        case IDM_FILE_MONITOR: {
+            int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
+            if (selected >= 0) {
+                wchar_t szName[MAX_PATH] = { 0 };
+                ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
+                std::wstring full = BuildRemoteFullPath(hDlg, szName);
+                std::string rPath = WideToUTF8(full);
+                bool active = s_dlgMonitorActive[hDlg];
+                SendRemoteCommand(clientId, CMD_FILE_MONITOR, active ? 0 : 1, 0, rPath.c_str(), rPath.size());
+                s_dlgMonitorActive[hDlg] = !active;
+                HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+                if (hStatusBar) {
+                    std::wstring msg = s_dlgMonitorActive[hDlg] ? (L"已开启监控: " + full) : L"已停止监控";
+                    SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)msg.c_str());
+                }
             }
             break;
         }
@@ -556,20 +727,18 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 wchar_t size[MAX_PATH] = { 0 };
                 wchar_t type[MAX_PATH] = { 0 };
                 wchar_t time[MAX_PATH] = { 0 };
-                wchar_t dir[MAX_PATH] = { 0 };
                 ListView_GetItemText(hList, selected, 0, name, MAX_PATH);
                 ListView_GetItemText(hList, selected, 1, size, MAX_PATH);
                 ListView_GetItemText(hList, selected, 2, type, MAX_PATH);
                 ListView_GetItemText(hList, selected, 3, time, MAX_PATH);
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, dir, MAX_PATH);
 
-                std::wstring full = dir;
-                if (full.empty()) full = L"C:\\";
-                if (full.back() != L'\\') full += L'\\';
-                full += name;
+                std::wstring full = BuildRemoteFullPath(hDlg, name);
 
                 std::wstring msg = L"路径: " + full + L"\r\n类型: " + type + L"\r\n大小: " + size + L"\r\n修改时间: " + time;
                 MessageBoxW(hDlg, msg.c_str(), L"属性", MB_OK | MB_ICONINFORMATION);
+
+                std::string rPath = WideToUTF8(full);
+                SendRemoteCommand(clientId, CMD_FILE_SIZE, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
             }
             break;
         }
@@ -606,17 +775,17 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 wchar_t szName[MAX_PATH];
                 ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
 
-                wchar_t szPath[MAX_PATH];
-                GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-
-                std::wstring fullRemote = szPath;
-                if (fullRemote.back() != L'\\') fullRemote += L'\\';
-                fullRemote += szName;
+                std::wstring fullRemote = BuildRemoteFullPath(hDlg, szName);
+                std::wstring baseName = szName;
+                if (IsFullRemotePath(szName)) {
+                    size_t pos = fullRemote.find_last_of(L"\\/");
+                    if (pos != std::wstring::npos) baseName = fullRemote.substr(pos + 1);
+                }
 
                 // 选择本地保存路径
                 OPENFILENAMEW ofn = { 0 };
                 wchar_t szLocal[MAX_PATH];
-                wcscpy_s(szLocal, szName);
+                wcscpy_s(szLocal, baseName.c_str());
                 ofn.lStructSize = sizeof(ofn);
                 ofn.hwndOwner = hDlg;
                 ofn.lpstrFile = szLocal;
@@ -631,7 +800,38 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                     }
                     if (client) {
                         if (client->hFileDownload != INVALID_HANDLE_VALUE) CloseHandle(client->hFileDownload);
-                        client->hFileDownload = CreateFileW(szLocal, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                        uint64_t resumeOffset = 0;
+                        bool resume = false;
+                        DWORD attr = GetFileAttributesW(szLocal);
+                        if (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+                            HANDLE hExist = CreateFileW(szLocal, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                            if (hExist != INVALID_HANDLE_VALUE) {
+                                LARGE_INTEGER liSize;
+                                if (GetFileSizeEx(hExist, &liSize) && liSize.QuadPart > 0) {
+                                    int res = MessageBoxW(hDlg, L"检测到本地已有文件，是否断点续传？", L"提示", MB_YESNOCANCEL | MB_ICONQUESTION);
+                                    if (res == IDCANCEL) {
+                                        CloseHandle(hExist);
+                                        break;
+                                    }
+                                    if (res == IDYES) {
+                                        resumeOffset = (uint64_t)(liSize.QuadPart / (LONGLONG)kDownloadChunkSize) * kDownloadChunkSize;
+                                        resume = (resumeOffset > 0);
+                                    }
+                                }
+                                CloseHandle(hExist);
+                            }
+                        }
+                        if (resume) {
+                            client->hFileDownload = CreateFileW(szLocal, GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                            if (client->hFileDownload != INVALID_HANDLE_VALUE) {
+                                LARGE_INTEGER liMove;
+                                liMove.QuadPart = (LONGLONG)resumeOffset;
+                                SetFilePointerEx(client->hFileDownload, liMove, NULL, FILE_BEGIN);
+                                SetEndOfFile(client->hFileDownload);
+                            }
+                        } else {
+                            client->hFileDownload = CreateFileW(szLocal, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                        }
                         client->downloadPath = szLocal;
                         
                         // 获取/估算文件大小以显示进度
@@ -650,14 +850,30 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                         else totalBytes = (unsigned long long)sizeVal;
                         
                         client->totalDownloadSize = totalBytes;
-                        client->currentDownloadSize = 0;
+                        client->currentDownloadSize = resume ? resumeOffset : 0;
+                        {
+                            std::lock_guard<std::mutex> lock(s_transferMutex);
+                            s_transferTotalBytes[hDlg] = totalBytes;
+                            s_transferLastBytes[hDlg] = client->currentDownloadSize;
+                            s_transferLastTick[hDlg] = GetTickCount64();
+                            s_transferSpeedBps[hDlg] = 0.0;
+                        }
                         
                         // 重置进度条
-                        SendDlgItemMessage(hDlg, IDC_PROGRESS_BAR, PBM_SETPOS, 0, 0);
+                        int initProgress = 0;
+                        if (client->totalDownloadSize > 0 && client->currentDownloadSize > 0) {
+                            initProgress = (int)((client->currentDownloadSize * 100) / client->totalDownloadSize);
+                        }
+                        SendDlgItemMessage(hDlg, IDC_PROGRESS_BAR, PBM_SETPOS, initProgress, 0);
 
                         // 发送下载命令
                         std::string rPath = WideToUTF8(fullRemote);
-                        SendRemoteCommand(clientId, CMD_FILE_DOWNLOAD, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
+                        if (resume) {
+                            std::string rPathResume = rPath + "|" + std::to_string(resumeOffset);
+                            SendRemoteCommand(clientId, CMD_FILE_DOWNLOAD, (uint32_t)rPathResume.size(), 0, rPathResume.c_str(), rPathResume.size());
+                        } else {
+                            SendRemoteCommand(clientId, CMD_FILE_DOWNLOAD, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
+                        }
                         MessageBoxW(hDlg, L"已开始下载文件", L"提示", MB_OK);
                     }
                 }
@@ -668,19 +884,22 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (selected >= 0) {
                 if (MessageBoxW(hDlg, L"确定要删除选中的文件/文件夹吗？", L"确认删除", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                    wchar_t szName[MAX_PATH] = { 0 };
+                    std::vector<std::wstring> targets;
+                    int idx = -1;
+                    while ((idx = ListView_GetNextItem(hList, idx, LVNI_SELECTED)) >= 0) {
+                        wchar_t szName[MAX_PATH] = { 0 };
+                        ListView_GetItemText(hList, idx, 0, szName, MAX_PATH);
+                        targets.push_back(BuildRemoteFullPath(hDlg, szName));
+                    }
+                    std::string payload;
+                    for (size_t i = 0; i < targets.size(); ++i) {
+                        if (i > 0) payload += "\n";
+                        payload += WideToUTF8(targets[i]);
+                    }
+                    SendRemoteCommand(clientId, CMD_FILE_DELETE, (uint32_t)payload.size(), 0, payload.c_str(), payload.size());
+
                     wchar_t szPath[MAX_PATH] = { 0 };
-                    ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
                     GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
-
-                    std::wstring full = szPath;
-                    if (full.empty()) full = L"C:\\";
-                    if (full.back() != L'\\') full += L'\\';
-                    full += szName;
-
-                    std::string rPath = WideToUTF8(full);
-                    SendRemoteCommand(clientId, CMD_FILE_DELETE, (uint32_t)rPath.size(), 0, rPath.c_str(), rPath.size());
-
                     std::string refresh = WideToUTF8(std::wstring(szPath));
                     if (refresh.empty()) refresh = "C:\\";
                     SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)refresh.size(), 0, refresh.c_str(), refresh.size());
@@ -716,6 +935,25 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)refresh.size(), 0, refresh.c_str(), refresh.size());
             break;
         }
+        case IDM_FILE_COMPRESS:
+        case IDM_FILE_UNCOMPRESS: {
+            std::vector<std::wstring> targets;
+            int idx = -1;
+            while ((idx = ListView_GetNextItem(hList, idx, LVNI_SELECTED)) >= 0) {
+                wchar_t szName[MAX_PATH] = { 0 };
+                ListView_GetItemText(hList, idx, 0, szName, MAX_PATH);
+                targets.push_back(BuildRemoteFullPath(hDlg, szName));
+            }
+            if (targets.empty()) break;
+            std::string payload;
+            for (size_t i = 0; i < targets.size(); ++i) {
+                if (i > 0) payload += "\n";
+                payload += WideToUTF8(targets[i]);
+            }
+            uint32_t cmd = (LOWORD(wParam) == IDM_FILE_COMPRESS) ? CMD_FILE_COMPRESS : CMD_FILE_UNCOMPRESS;
+            SendRemoteCommand(clientId, cmd, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+            break;
+        }
         case IDM_FILE_COPY_PATH: {
             int selected = ListView_GetNextItem(hList, -1, LVNI_SELECTED);
             if (selected >= 0) {
@@ -723,10 +961,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 wchar_t szName[MAX_PATH] = { 0 };
                 GetDlgItemTextW(hDlg, IDC_EDIT_FILE_PATH_REMOTE, szPath, MAX_PATH);
                 ListView_GetItemText(hList, selected, 0, szName, MAX_PATH);
-                
-                std::wstring fullPath = szPath;
-                if (fullPath.back() != L'\\') fullPath += L'\\';
-                fullPath += szName;
+                std::wstring fullPath = BuildRemoteFullPath(hDlg, szName);
                 
                 // 复制到剪贴板
                 if (OpenClipboard(hDlg)) {
@@ -759,6 +994,14 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             s_dlgToClientId.erase(hDlg);
             s_dlgViewMode.erase(hDlg);
             s_dlgRenameOldName.erase(hDlg);
+            s_dlgMonitorActive.erase(hDlg);
+            {
+                std::lock_guard<std::mutex> lock(s_transferMutex);
+                s_transferTotalBytes.erase(hDlg);
+                s_transferLastBytes.erase(hDlg);
+                s_transferLastTick.erase(hDlg);
+                s_transferSpeedBps.erase(hDlg);
+            }
         }
         EndDialog(hDlg, 0);
         return (INT_PTR)TRUE;

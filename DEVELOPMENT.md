@@ -34,7 +34,6 @@
 3.  **ClientSide (被控端)**
     *   **路径**: 
         *   EXE版本: `e:\github\Formidable2026\ClientSide\Client\Client.vcxproj`
-        *   DLL版本: `e:\github\Formidable2026\ClientSide\ClientDLL\ClientDLL.vcxproj`
     *   **依赖**: 依赖 `Common.lib`。
     *   **输出**: 生成最终的被控端程序。
 

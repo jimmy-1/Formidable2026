@@ -204,7 +204,6 @@
 // 主菜单项
 #define IDM_MENU_SET            1601
 #define IDM_TOOL_INPUT_PASSWORD 1602
-#define IDM_TOOL_GEN_SHELLCODE  1603
 #define IDM_TOOL_RELOAD_PLUGINS 1604
 #define IDM_TOOL_AUTH           1605
 #define IDM_TOOL_GEN_MASTER     1606
@@ -291,6 +290,11 @@
 #define IDM_FILE_EXECUTE        2027
 #define IDM_FILE_COPY_PATH      2028
 #define IDM_FILE_PROPERTIES     2029
+#define IDM_FILE_COMPRESS       2034
+#define IDM_FILE_UNCOMPRESS     2035
+#define IDM_FILE_PREVIEW        2036
+#define IDM_FILE_HISTORY        2037
+#define IDM_FILE_MONITOR        2038
 // 文件管理视图切换
 #define IDM_FILE_VIEW_LIST      2030
 #define IDM_FILE_VIEW_ICON      2031
@@ -334,10 +338,4 @@
 #define IDR_MOD_REGISTRY_X64    907
 #define IDR_MOD_MULTIMEDIA_X64  639
 #define IDR_MOD_NETWORK_X64     908
-#define IDR_CLIENT_DLL          640
-#define IDR_CLIENT_DLL_X64      641
-#define IDR_LOADER_EXE          642
-#define IDR_LOADER_EXE_X64      643
-#define IDR_DROPPER_EXE         644
-#define IDR_DROPPER_EXE_X64     645
 #define IDR_UPX_EXE             646908

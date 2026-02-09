@@ -247,9 +247,6 @@ END
 // 二进制资源 - x86
 #if defined(_DEBUG)
 IDR_CLIENT_EXE          BIN     "Client.exe"
-IDR_CLIENT_DLL          BIN     "ClientDLL.dll"
-IDR_LOADER_EXE          BIN     "ShellCodeLoader.exe"
-IDR_DROPPER_EXE         BIN     "Dropper.exe"
 IDR_MOD_PROCESS         BIN     "ModuleProcessManager.dll"
 IDR_MOD_SYSTEM          BIN     "ModuleSystemInfo.dll"
 IDR_MOD_TERMINAL        BIN     "ModuleTerminal.dll"
@@ -258,12 +255,9 @@ IDR_MOD_FILE            BIN     "ModuleFileManager.dll"
 IDR_MOD_SERVICE         BIN     "ModuleServiceManager.dll"
 IDR_MOD_REGISTRY        BIN     "ModuleRegistryManager.dll"
 IDR_MOD_MULTIMEDIA      BIN     "ModuleMultimedia.dll"
-IDR_MOD_NETWORK         BIN     "ModuleNetworkManager.dll"
+IDR_MOD_NETWORK         BIN     "NetworkManager.dll"
 #else
 IDR_CLIENT_EXE          BIN     "..\\Formidable2026\\x86\\Client.exe"
-IDR_CLIENT_DLL          BIN     "..\\Formidable2026\\x86\\ClientDLL.dll"
-IDR_LOADER_EXE          BIN     "..\\Formidable2026\\x86\\ShellCodeLoader.exe"
-IDR_DROPPER_EXE         BIN     "..\\Formidable2026\\x86\\Dropper.exe"
 IDR_MOD_PROCESS         BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
 IDR_MOD_SYSTEM          BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
 IDR_MOD_TERMINAL        BIN     "..\\Formidable2026\\x86\\Terminal.dll"
@@ -272,15 +266,12 @@ IDR_MOD_FILE            BIN     "..\\Formidable2026\\x86\\FileManager.dll"
 IDR_MOD_SERVICE         BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
 IDR_MOD_REGISTRY        BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
 IDR_MOD_MULTIMEDIA      BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
-IDR_MOD_NETWORK         BIN     "..\\Formidable2026\\x86\\ModuleNetworkManager.dll"
+IDR_MOD_NETWORK         BIN     "..\\Formidable2026\\x86\\NetworkManager.dll"
 #endif
 
 // 二进制资源 - x64
 #if defined(_DEBUG)
 IDR_CLIENT_EXE_X64      BIN     "Client.exe"
-IDR_CLIENT_DLL_X64      BIN     "ClientDLL.dll"
-IDR_LOADER_EXE_X64      BIN     "ShellCodeLoader.exe"
-IDR_DROPPER_EXE_X64     BIN     "Dropper.exe"
 IDR_MOD_PROCESS_X64     BIN     "ModuleProcessManager.dll"
 IDR_MOD_SYSTEM_X64      BIN     "ModuleSystemInfo.dll"
 IDR_MOD_TERMINAL_X64    BIN     "ModuleTerminal.dll"
@@ -289,12 +280,9 @@ IDR_MOD_FILE_X64        BIN     "ModuleFileManager.dll"
 IDR_MOD_SERVICE_X64     BIN     "ModuleServiceManager.dll"
 IDR_MOD_REGISTRY_X64    BIN     "ModuleRegistryManager.dll"
 IDR_MOD_MULTIMEDIA_X64  BIN     "ModuleMultimedia.dll"
-IDR_MOD_NETWORK_X64     BIN     "ModuleNetworkManager.dll"
+IDR_MOD_NETWORK_X64     BIN     "NetworkManager.dll"
 #else
 IDR_CLIENT_EXE_X64      BIN     "..\\Formidable2026\\x64\\Client.exe"
-IDR_CLIENT_DLL_X64      BIN     "..\\Formidable2026\\x64\\ClientDLL.dll"
-IDR_LOADER_EXE_X64      BIN     "..\\Formidable2026\\x64\\ShellCodeLoader.exe"
-IDR_DROPPER_EXE_X64     BIN     "..\\Formidable2026\\x64\\Dropper.exe"
 IDR_MOD_PROCESS_X64     BIN     "..\\Formidable2026\\x64\\ProcessManager.dll"
 IDR_MOD_SYSTEM_X64      BIN     "..\\Formidable2026\\x64\\SystemInfo.dll"
 IDR_MOD_TERMINAL_X64    BIN     "..\\Formidable2026\\x64\\Terminal.dll"
@@ -303,12 +291,16 @@ IDR_MOD_FILE_X64        BIN     "..\\Formidable2026\\x64\\FileManager.dll"
 IDR_MOD_SERVICE_X64     BIN     "..\\Formidable2026\\x64\\ServiceManager.dll"
 IDR_MOD_REGISTRY_X64    BIN     "..\\Formidable2026\\x64\\RegistryManager.dll"
 IDR_MOD_MULTIMEDIA_X64  BIN     "..\\Formidable2026\\x64\\Multimedia.dll"
-IDR_MOD_NETWORK_X64     BIN     "..\\Formidable2026\\x64\\ModuleNetworkManager.dll"
+IDR_MOD_NETWORK_X64     BIN     "..\\Formidable2026\\x64\\NetworkManager.dll"
 #endif
 
 // UPX
 #if defined(_DEBUG)
 IDR_UPX_EXE             BIN     "upx.exe"
 #else
-IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx.exe"
+#if defined(_WIN64)
+IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx64.exe"
+#else
+IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx32.exe"
+#endif
 #endif

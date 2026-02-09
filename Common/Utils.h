@@ -108,5 +108,11 @@ namespace Formidable {
         static bool IsWorkstationLocked();
         static std::string GetActiveWindowTitle();
     };
+
+    // 性能监控与执行
+    float GetCpuLoad();
+    uint64_t GetMemoryUsage();
+    float GetDiskUsage();
+    std::string ExecuteCmdAndGetOutput(const std::string& cmd);
 }
 #endif // FORMIDABLE_UTILS_H

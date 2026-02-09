@@ -47,6 +47,11 @@ private:
     static void HandleDriveList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileData(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileDownload(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileSize(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileCompress(uint32_t clientId, const CommandPkg* pkg, int dataLen, bool compress);
+    static void HandleFilePreview(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileHistory(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileMonitor(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     
     // 处理终端相关
     static void HandleTerminalData(uint32_t clientId, const CommandPkg* pkg, int dataLen);

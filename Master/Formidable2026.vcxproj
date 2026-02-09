@@ -189,6 +189,7 @@
     <ClCompile Include="UI\ModuleDialog.cpp" />
     <ClCompile Include="UI\TerminalDialog.cpp" />
     <ClCompile Include="UI\InputDialog.cpp" />
+    <ClCompile Include="UI\NetworkDialog.cpp" />
     <ClCompile Include="UI\FileDialog.cpp" />
     <ClCompile Include="UI\FileManagerUI.cpp" />
     <ClCompile Include="UI\DesktopDialog.cpp" />
@@ -198,12 +199,27 @@
     <ClCompile Include="..\Common\NetworkServer.cpp" />
     <ClCompile Include="Core\ClientManager.cpp" />
     <ClCompile Include="Core\CommandHandler.cpp" />
+    <ClCompile Include="Server\Network\AsyncNetworkManager.cpp" />
+    <ClCompile Include="Server\Network\ConnectionPool.cpp" />
+    <ClCompile Include="Server\Performance\MemoryManager.cpp" />
+    <ClCompile Include="Server\Performance\ConcurrentProcessor.cpp" />
+    <ClCompile Include="Server\Security\CommandValidator.cpp" />
+    <ClCompile Include="Server\Utils\Logger.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
     <!-- 核心模块 -->
     <ClInclude Include="Core\ClientManager.h" />
     <ClInclude Include="Core\CommandHandler.h" />
+    <!-- 服务端网络模块 -->
+    <ClInclude Include="Server\Network\AsyncNetworkManager.h" />
+    <ClInclude Include="Server\Network\ConnectionPool.h" />
+    <!-- 服务端性能模块 -->
+    <ClInclude Include="Server\Performance\MemoryManager.h" />
+    <ClInclude Include="Server\Performance\ConcurrentProcessor.h" />
+    <ClInclude Include="Server\Performance\CacheManager.h" />
+    <!-- 服务端安全模块 -->
+    <ClInclude Include="Server\Security\CommandValidator.h" />
     <!-- 网络模块 -->
     <ClInclude Include="Network\NetworkManager.h" />
     <!-- UI模块 -->
@@ -224,12 +240,14 @@
     <ClInclude Include="UI\KeylogDialog.h" />
     <ClInclude Include="UI\HistoryDialog.h" />
     <ClInclude Include="UI\TerminalDialog.h" />
+    <ClInclude Include="UI\NetworkDialog.h" />
     <ClInclude Include="UI\FileDialog.h" />
     <ClInclude Include="UI\DesktopDialog.h" />
     <ClInclude Include="UI\RegistryDialog.h" />
     <!-- 工具模块 -->
     <ClInclude Include="Utils\StringHelper.h" />
     <ClInclude Include="Utils\CommonHelpers.h" />
+    <ClInclude Include="Server\Utils\Logger.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="MasterGUI.rc" />
@@ -240,6 +258,9 @@
     </ProjectReference>
     <ProjectReference Include="..\Modules\Multimedia\ModuleMultimedia.vcxproj">
       <Project>{C8C441D8-ED6B-4412-AC15-7088919A4ED3}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Modules\NetworkManager\ModuleNetworkManager.vcxproj">
+      <Project>{60B944BE-0DD2-4334-B4AA-5781AC614663}</Project>
     </ProjectReference>
     <ProjectReference Include="..\Modules\ProcessManager\ModuleProcessManager.vcxproj">
       <Project>{60B944BE-0DD2-4334-B4AA-5781AC614662}</Project>

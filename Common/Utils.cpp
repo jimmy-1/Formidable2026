@@ -1,4 +1,5 @@
 ﻿#include "Utils.h"
+#include <pdh.h>
 #include <winternl.h>
 #include <tlhelp32.h>
 #include <psapi.h>
@@ -20,6 +21,7 @@
 #pragma comment(lib, "User32.lib")
 #pragma comment(lib, "vfw32.lib")
 #pragma comment(lib, "wtsapi32.lib")
+#pragma comment(lib, "Pdh.lib")
 namespace Formidable {
     std::string WideToUTF8(const std::wstring& wstr) {
         if (wstr.empty()) return "";
@@ -766,6 +768,87 @@ namespace Formidable {
             }
             CloseClipboard();
         }
+    }
+
+    float GetCpuLoad() {
+        static PDH_HQUERY cpuQuery;
+        static PDH_HCOUNTER cpuTotal;
+        static bool initialized = false;
+
+        if (!initialized) {
+            if (PdhOpenQuery(NULL, NULL, &cpuQuery) == ERROR_SUCCESS) {
+                // Try English counter first (Vista+)
+                if (PdhAddEnglishCounterW(cpuQuery, L"\\Processor(_Total)\\% Processor Time", NULL, &cpuTotal) != ERROR_SUCCESS) {
+                    // Fallback to standard (might fail on non-English if not using lookup)
+                    PdhAddCounterW(cpuQuery, L"\\Processor(_Total)\\% Processor Time", NULL, &cpuTotal);
+                }
+                PdhCollectQueryData(cpuQuery);
+                initialized = true;
+            }
+        }
+
+        if (initialized) {
+            PDH_FMT_COUNTERVALUE counterVal;
+            PdhCollectQueryData(cpuQuery);
+            if (PdhGetFormattedCounterValue(cpuTotal, PDH_FMT_DOUBLE, NULL, &counterVal) == ERROR_SUCCESS) {
+                return (float)counterVal.doubleValue;
+            }
+        }
+        return 0.0f;
+    }
+
+    uint64_t GetMemoryUsage() {
+        MEMORYSTATUSEX memInfo;
+        memInfo.dwLength = sizeof(MEMORYSTATUSEX);
+        if (GlobalMemoryStatusEx(&memInfo)) {
+            return memInfo.ullTotalPhys - memInfo.ullAvailPhys;
+        }
+        return 0;
+    }
+
+    float GetDiskUsage() {
+        ULARGE_INTEGER freeBytesAvailableToCaller;
+        ULARGE_INTEGER totalNumberOfBytes;
+        ULARGE_INTEGER totalNumberOfFreeBytes;
+        if (GetDiskFreeSpaceExW(L"C:\\", &freeBytesAvailableToCaller, &totalNumberOfBytes, &totalNumberOfFreeBytes)) {
+            if (totalNumberOfBytes.QuadPart == 0) return 0.0f;
+            return 100.0f * (1.0f - (float)totalNumberOfFreeBytes.QuadPart / (float)totalNumberOfBytes.QuadPart);
+        }
+        return 0.0f;
+    }
+
+    std::string ExecuteCmdAndGetOutput(const std::string& cmd) {
+        std::string result;
+        HANDLE hPipeRead, hPipeWrite;
+
+        SECURITY_ATTRIBUTES saAttr = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+        if (!CreatePipe(&hPipeRead, &hPipeWrite, &saAttr, 0)) return "";
+
+        STARTUPINFOW si = { sizeof(STARTUPINFOW) };
+        si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+        si.hStdOutput = hPipeWrite;
+        si.hStdError = hPipeWrite;
+        si.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION pi = { 0 };
+        std::wstring wCmd = L"cmd.exe /c " + UTF8ToWide(cmd);
+
+        if (CreateProcessW(NULL, &wCmd[0], NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+            CloseHandle(hPipeWrite); // Close write end in parent
+            
+            char buffer[4096];
+            DWORD bytesRead;
+            while (ReadFile(hPipeRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+                buffer[bytesRead] = '\0';
+                result += buffer;
+            }
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        } else {
+             CloseHandle(hPipeWrite);
+        }
+        CloseHandle(hPipeRead);
+        return result;
     }
 
 }
