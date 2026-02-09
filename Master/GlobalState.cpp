@@ -17,6 +17,21 @@
 #ifndef DWMWCP_ROUND
 #define DWMWCP_ROUND 2
 #endif
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+#ifndef DWMWA_BORDER_COLOR
+#define DWMWA_BORDER_COLOR 34
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
+#ifndef DWMSBT_MAINWINDOW
+#define DWMSBT_MAINWINDOW 2
+#endif
 
 // 全局变量定义
 HINSTANCE g_hInstance;
@@ -57,15 +72,17 @@ static HBRUSH g_hUiBackgroundBrush = NULL;
 static COLORREF g_uiBackgroundColor = RGB(248, 248, 248);
 static COLORREF g_uiTextColor = RGB(20, 20, 20);
 static COLORREF g_uiListBackgroundColor = RGB(255, 255, 255);
+static COLORREF g_uiAccentColor = RGB(0, 120, 215);
 
 static void EnsureUiBrush() {
     if (!g_hUiBackgroundBrush) {
         g_hUiBackgroundBrush = CreateSolidBrush(g_uiBackgroundColor);
     }
+    g_uiAccentColor = GetSysColor(COLOR_HIGHLIGHT);
 }
 
-static void ApplyWindowCorner(HWND hWnd) {
-    typedef HRESULT (WINAPI* DwmSetWindowAttributePtr)(HWND, DWORD, LPCVOID, DWORD);
+typedef HRESULT (WINAPI* DwmSetWindowAttributePtr)(HWND, DWORD, LPCVOID, DWORD);
+static DwmSetWindowAttributePtr GetDwmSetWindowAttribute() {
     static DwmSetWindowAttributePtr pDwmSetWindowAttribute = nullptr;
     static bool s_checked = false;
     if (!s_checked) {
@@ -75,9 +92,28 @@ static void ApplyWindowCorner(HWND hWnd) {
             pDwmSetWindowAttribute = (DwmSetWindowAttributePtr)GetProcAddress(hDwm, "DwmSetWindowAttribute");
         }
     }
+    return pDwmSetWindowAttribute;
+}
+
+static void ApplyWindowCorner(HWND hWnd) {
+    DwmSetWindowAttributePtr pDwmSetWindowAttribute = GetDwmSetWindowAttribute();
     if (pDwmSetWindowAttribute) {
         int pref = DWMWCP_ROUND;
         pDwmSetWindowAttribute(hWnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+    }
+}
+
+static void ApplyWindowBackdrop(HWND hWnd) {
+    DwmSetWindowAttributePtr pDwmSetWindowAttribute = GetDwmSetWindowAttribute();
+    if (pDwmSetWindowAttribute) {
+        int backdrop = DWMSBT_MAINWINDOW;
+        pDwmSetWindowAttribute(hWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+        COLORREF border = g_uiAccentColor;
+        pDwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, &border, sizeof(border));
+        COLORREF caption = g_uiBackgroundColor;
+        pDwmSetWindowAttribute(hWnd, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+        COLORREF text = g_uiTextColor;
+        pDwmSetWindowAttribute(hWnd, DWMWA_TEXT_COLOR, &text, sizeof(text));
     }
 }
 
@@ -136,6 +172,24 @@ static void ApplyThemeToControl(HWND hCtrl) {
         TreeView_SetTextColor(hCtrl, g_uiTextColor);
         return;
     }
+    if (_wcsicmp(cls, WC_EDITW) == 0) {
+        removeBorder();
+        SendMessageW(hCtrl, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
+        return;
+    }
+    if (_wcsicmp(cls, WC_COMBOBOXW) == 0) {
+        removeBorder();
+        SendMessageW(hCtrl, CB_SETITEMHEIGHT, (WPARAM)-1, (LPARAM)24);
+        return;
+    }
+    if (_wcsicmp(cls, L"Button") == 0) {
+        LONG_PTR style = GetWindowLongPtrW(hCtrl, GWL_STYLE);
+        if ((style & BS_TYPEMASK) == BS_PUSHBUTTON || (style & BS_TYPEMASK) == BS_DEFPUSHBUTTON) {
+            RECT margins = { 12, 6, 12, 6 };
+            SendMessageW(hCtrl, BCM_SETTEXTMARGIN, 0, (LPARAM)&margins);
+        }
+        return;
+    }
     if (_wcsicmp(cls, WC_TABCONTROLW) == 0) {
         return;
     }
@@ -156,6 +210,7 @@ void ApplyModernTheme(HWND hWnd) {
     if (!hWnd) return;
     EnsureUiBrush();
     ApplyWindowCorner(hWnd);
+    ApplyWindowBackdrop(hWnd);
     EnumChildWindows(hWnd, ApplyThemeEnumProc, 0);
 }
 

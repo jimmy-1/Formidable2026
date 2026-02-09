@@ -20,6 +20,7 @@
 #include "../resource.h"
 #include "../../Common/Config.h"
 #include <CommDlg.h>
+#include <CommCtrl.h>
 #include <string>
 #include <vector>
 

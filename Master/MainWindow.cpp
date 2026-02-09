@@ -1265,14 +1265,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         
         int toolbarHeight = rcToolbar.bottom - rcToolbar.top;
         int statusHeight = rcStatus.bottom - rcStatus.top;
-        int tabHeight = 25;  // Tab控件高度
+        int tabHeight = 25;
         int logHeight = 150;
-        int remainHeight = height - toolbarHeight - statusHeight - tabHeight;
+        int margin = 8;
+        int remainHeight = height - toolbarHeight - statusHeight - tabHeight - margin * 3;
         
         MoveWindow(g_hToolbar, 0, 0, width, toolbarHeight, TRUE);
         MoveWindow(g_hGroupTab, 0, toolbarHeight, width, tabHeight, TRUE);
-        MoveWindow(g_hListClients, 0, toolbarHeight + tabHeight, width, remainHeight - logHeight, TRUE);
-        MoveWindow(g_hListLogs, 0, height - statusHeight - logHeight, width, logHeight, TRUE);
+        int contentTop = toolbarHeight + tabHeight + margin;
+        int listWidth = width - margin * 2;
+        int clientHeight = remainHeight - logHeight;
+        if (clientHeight < 0) clientHeight = 0;
+        MoveWindow(g_hListClients, margin, contentTop, listWidth, clientHeight, TRUE);
+        MoveWindow(g_hListLogs, margin, contentTop + clientHeight + margin, listWidth, logHeight, TRUE);
         SendMessage(g_hStatusBar, WM_SIZE, 0, 0);
         break;
     }

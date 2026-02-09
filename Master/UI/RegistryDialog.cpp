@@ -80,11 +80,6 @@ static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, u
     pkg.arg1 = rootIdx; // 根键索引
     pkg.arg2 = action;  // 1=Keys, 2=Values
     
-    // 将 HTREEITEM 存储在 pkg 的保留位或作为数据一部分发送？
-    // 由于 CommandPkg 结构固定，我们可以尝试把 HTREEITEM 的低32位存入 pkg.reserve[0]
-    // 这样 CommandHandler 收到后可以直接对应到节点，解决异步乱序导致的“循环”问题
-    pkg.reserve[0] = (uint32_t)(uintptr_t)hItem;
-
     size_t bodySize = sizeof(Formidable::CommandPkg) + path.size();
     std::vector<char> sendBuf(sizeof(Formidable::PkgHeader) + bodySize);
     Formidable::PkgHeader* h = (Formidable::PkgHeader*)sendBuf.data();
@@ -295,7 +290,6 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                     SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 2);
                     
                     // 2. 如果没有子节点，请求子键
-                    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
                     if (TreeView_GetChild(hTree, pnmtv->itemNew.hItem) == NULL) {
                         SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 1);
                     }

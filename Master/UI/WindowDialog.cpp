@@ -40,7 +40,8 @@ INT_PTR CALLBACK WindowDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
         
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_WINDOW), 5, 5, width - 10, height - 10, TRUE);
+        int margin = 8;
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_WINDOW), margin, margin, width - margin * 2, height - margin * 2, TRUE);
         return (INT_PTR)TRUE;
     }
     case WM_NOTIFY: {

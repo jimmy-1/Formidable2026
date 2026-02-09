@@ -127,11 +127,11 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         int width = rc.right - rc.left;
         int height = rc.bottom - rc.top;
 
-        // 底部按钮区域高度
-        int btnAreaHeight = 40;
-        int btnY = height - 30;
-        int btnWidth = 90;
-        int btnHeight = 25;
+        int margin = 8;
+        int btnAreaHeight = 44;
+        int btnWidth = 96;
+        int btnHeight = 28;
+        int btnY = height - btnAreaHeight + (btnAreaHeight - btnHeight) / 2;
 
         // 调整按钮位置
         HWND hClear = GetDlgItem(hDlg, IDC_BTN_CLEAR_HISTORY);
@@ -140,14 +140,14 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         // 尝试获取 IDOK 作为关闭按钮（如果是 IDOK）
         if (!hClose || !IsWindow(hClose)) hClose = GetDlgItem(hDlg, IDOK);
 
-        if (hClear) MoveWindow(hClear, 10, btnY, btnWidth, btnHeight, TRUE);
-        if (hExport) MoveWindow(hExport, 15 + btnWidth, btnY, btnWidth, btnHeight, TRUE);
-        if (hClose) MoveWindow(hClose, width - 10 - btnWidth, btnY, btnWidth, btnHeight, TRUE);
+        if (hClear) MoveWindow(hClear, margin, btnY, btnWidth, btnHeight, TRUE);
+        if (hExport) MoveWindow(hExport, margin * 2 + btnWidth, btnY, btnWidth, btnHeight, TRUE);
+        if (hClose) MoveWindow(hClose, width - margin - btnWidth, btnY, btnWidth, btnHeight, TRUE);
 
         // 调整列表控件大小
         HWND hList = GetDlgItem(hDlg, IDC_LIST_HISTORY);
         if (hList) {
-            MoveWindow(hList, 0, 0, width, height - btnAreaHeight, TRUE);
+            MoveWindow(hList, margin, margin, width - margin * 2, height - btnAreaHeight - margin * 2, TRUE);
         }
         return (INT_PTR)TRUE;
     }

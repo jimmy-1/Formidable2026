@@ -281,13 +281,14 @@ INT_PTR CALLBACK TerminalDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
 
         // 调整各控件位置
         // Output (Terminal) - 占据上方大部分空间
-        int listHeight = 150; // 常用命令列表高度
-        int outputHeight = height - listHeight - 15;
-        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_TERM_OUT), 5, 5, width - 10, outputHeight, TRUE);
+        int margin = 8;
+        int listHeight = 150;
+        int outputHeight = height - listHeight - margin * 3;
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_TERM_OUT), margin, margin, width - margin * 2, outputHeight, TRUE);
         
         // Common Commands List - 占据下方空间
-        int listY = outputHeight + 10;
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_COMMON_CMDS), 5, listY, width - 10, listHeight, TRUE);
+        int listY = margin + outputHeight + margin;
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_COMMON_CMDS), margin, listY, width - margin * 2, listHeight, TRUE);
         
         return (INT_PTR)TRUE;
     }
