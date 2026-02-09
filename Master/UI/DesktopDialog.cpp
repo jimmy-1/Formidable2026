@@ -184,12 +184,8 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             int clientY = (int)(short)HIWORD(lParam);
 
             // 区域划分逻辑：
-            // 1. 顶部状态栏区域 (y < 40)：用于本地操作（如触发菜单），不映射到远程
-            // 2. 屏幕显示区域 (y >= 40)：用于操作远程屏幕，映射所有键盘鼠标
-            if (clientY < 40) {
-                break; // 跳出 switch，由系统处理消息（右键会触发 WM_CONTEXTMENU）
-            }
-
+            // 全局屏幕显示区域：用于操作远程屏幕，映射所有键盘鼠标
+            
             // 如果未启用控制，直接拦截消息但不发送
             if (!state.isControlEnabled) {
                 return 0;
@@ -548,28 +544,30 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
     case WM_CONTEXTMENU: {
         // 获取点击位置
         POINT pt;
+        bool isKeyboard = false;
         if (lParam == -1) {
             GetCursorPos(&pt);
+            isKeyboard = true;
         } else {
             pt.x = GET_X_LPARAM(lParam);
             pt.y = GET_Y_LPARAM(lParam);
+        }
 
-            // 检查点击位置
-            POINT ptClient = pt;
-            ScreenToClient(hDlg, &ptClient);
+        // 检查点击位置
+        POINT ptClient = pt;
+        ScreenToClient(hDlg, &ptClient);
 
-            // 1. 如果点击的是非客户区（如标题栏，y < 0），交给系统处理以弹出系统菜单
-            if (ptClient.y < 0) {
-                return (INT_PTR)FALSE; 
-            }
+        // 逻辑调整：
+        // 1. 如果是键盘触发 (Shift+F10 / Menu键)，允许弹出菜单
+        // 2. 如果点击的是非客户区（如标题栏、边框等，不在 GetClientRect 范围内），允许弹出菜单 (这就是用户说的“右键边框”)
+        // 3. 如果点击的是客户区 (远程屏幕显示区域)，则拦截，不弹出本地菜单（因为这部分区域要留给远程控制）
+        
+        RECT rcClient;
+        GetClientRect(hDlg, &rcClient);
 
-            // 2. 如果点击的是顶部状态栏区域 (0 <= y < 40)，则弹出自定义管理菜单
-            if (ptClient.y < 40) {
-                // 继续向下执行弹出逻辑
-            } else {
-                // 3. 屏幕显示区域 (y >= 40)：拦截本地菜单弹出
-                return (INT_PTR)TRUE; 
-            }
+        if (!isKeyboard && PtInRect(&rcClient, ptClient)) {
+            // 在屏幕显示区域：拦截本地菜单弹出
+            return (INT_PTR)TRUE; 
         }
 
         DesktopState& state = s_desktopStates[hDlg];
