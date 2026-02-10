@@ -7,7 +7,8 @@
 *   **操作系统**: Windows 10/11 (x64)
 *   **IDE**: Visual Studio 2022 (推荐) 或 2019
     *   **工作负载**: "使用 C++ 的桌面开发"
-    *   **关键组件**: MSVC v143 (或 v142), Windows 10/11 SDK, MFC/ATL。
+    *   **关键组件**: MSVC v145 (VS2017) 或 v143 (VS2022), Windows 10/11 SDK, MFC/ATL。
+        *   注意：FormidableNim 和 FormidableLoader 项目默认使用 **v145** 工具集，请确保已安装相应组件。
 *   **Git**: 用于版本管理。
 *   **Python 3**: (可选) 用于运行辅助脚本（如编码转换、DLL 部署）。
 *   **Nim 编译器**: 用于编译 `FormidableNim` 模块。

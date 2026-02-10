@@ -53,6 +53,7 @@ Formidable2026/
 
 ### 1. 环境准备
 *   Visual Studio 2022 (推荐) 或 2019
+    *   需安装 v145 (Visual Studio 2017) 构建工具以支持 FormidableNim/Loader 模块编译。
 *   Windows SDK 10.0+
 *   Python 3 (可选，用于辅助脚本)
 *   **一键配置环境**: 请右键管理员运行项目根目录下的 `setup_env.bat`，它会自动将内置的 Nim 编译器添加到系统环境变量中。

