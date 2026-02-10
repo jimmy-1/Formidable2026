@@ -205,10 +205,20 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             // 确保窗口获得焦点，以便接收键盘事件
             if (message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN) {
                 SetFocus(hWnd);
+                SetCapture(hWnd);
+            }
+            if (message == WM_LBUTTONUP || message == WM_RBUTTONUP) {
+                ReleaseCapture();
             }
 
             Formidable::RemoteMouseEvent ev = { 0 };
             ev.msg = message;
+            
+            // 规范化双击消息：将双击转换为单击按下，让被控端通过连续的 DOWN-UP 序列自然形成双击
+            if (message == WM_LBUTTONDBLCLK) ev.msg = WM_LBUTTONDOWN;
+            if (message == WM_RBUTTONDBLCLK) ev.msg = WM_RBUTTONDOWN;
+            if (message == WM_MBUTTONDBLCLK) ev.msg = WM_MBUTTONDOWN;
+
             RECT rc;
             GetClientRect(hWnd, &rc);
             
@@ -225,21 +235,17 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
                 remoteY = clientY + state.scrollY;
             }
 
-            if (state.remoteWidth > 0 && state.remoteHeight > 0) {
-                ev.x = remoteX * 65535 / state.remoteWidth;
-                ev.y = remoteY * 65535 / state.remoteHeight;
+            if (state.remoteWidth > 1 && state.remoteHeight > 1) {
+                ev.x = remoteX * 65535 / (state.remoteWidth - 1);
+                ev.y = remoteY * 65535 / (state.remoteHeight - 1);
             } else {
-                if (rc.right > 0 && rc.bottom > 0) {
-                    ev.x = clientX * 65535 / rc.right;
-                    ev.y = clientY * 65535 / rc.bottom;
+                if (rc.right > 1 && rc.bottom > 1) {
+                    ev.x = clientX * 65535 / (rc.right - 1);
+                    ev.y = clientY * 65535 / (rc.bottom - 1);
                 }
             }
 
             if (message == WM_MOUSEWHEEL) ev.data = (short)HIWORD(wParam);
-
-            if (message == WM_LBUTTONDBLCLK) ev.msg = WM_LBUTTONDOWN;
-            else if (message == WM_RBUTTONDBLCLK) ev.msg = WM_RBUTTONDOWN;
-            else if (message == WM_MBUTTONDBLCLK) ev.msg = WM_MBUTTONDOWN;
 
             SendRemoteControl(Formidable::CMD_MOUSE_EVENT, &ev, sizeof(Formidable::RemoteMouseEvent));
             
@@ -392,7 +398,13 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             
             // Subclass the static control to capture inputs
             hStatic = GetDlgItem(hDlg, IDC_STATIC_SCREEN);
-            SetWindowSubclass(hStatic, DesktopScreenProc, clientId, (DWORD_PTR)hDlg);
+            if (hStatic) {
+                // 确保静态控件可以接收鼠标消息
+                LONG style = GetWindowLong(hStatic, GWL_STYLE);
+                SetWindowLong(hStatic, GWL_STYLE, style | SS_NOTIFY);
+                
+                SetWindowSubclass(hStatic, DesktopScreenProc, clientId, (DWORD_PTR)hDlg);
+            }
         }
 
         ApplyModernTheme(hDlg);

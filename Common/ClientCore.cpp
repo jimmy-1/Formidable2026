@@ -1,6 +1,16 @@
 ﻿#include "ClientCore.h"
 #include "Utils.h"
+
+// 只有在非 DLL 模块编译时才包含 Logger，或者在 DLL 模块中禁用日志
+#ifndef FORMIDABLE_MODULE_DLL
 #include "../ClientSide/Client/Utils/Logger.h"
+#define LOG_INFO(msg) Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, msg)
+#define LOG_WARNING(msg) Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, msg)
+#else
+#define LOG_INFO(msg) 
+#define LOG_WARNING(msg)
+#endif
+
 #include "../ClientSide/Client/Core/AutomationManager.h"
 #include <thread>
 #include <vector>
@@ -206,7 +216,7 @@ namespace Formidable {
     }
 
     void LoadModuleFromMemory(SOCKET s, CommandPkg* pkg, int totalDataLen) {
-        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Processing Module Command: " + std::to_string(pkg->cmd));
+        LOG_INFO("Processing Module Command: " + std::to_string(pkg->cmd));
         bool hasDll = totalDataLen > (int)sizeof(CommandPkg);
         uint32_t effectiveCmd = pkg->cmd;
         if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
@@ -351,7 +361,7 @@ namespace Formidable {
                     if (sep != std::string::npos) {
                         std::string path = payload.substr(0, sep);
                         std::string pattern = payload.substr(sep + 1);
-                        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Searching files in " + path + " with pattern " + pattern);
+                        LOG_INFO("Searching files in " + path + " with pattern " + pattern);
                         std::string result = "";
                         int count = 0;
                         SearchFiles(UTF8ToWide(path), UTF8ToWide(pattern), result, count);
@@ -372,7 +382,7 @@ namespace Formidable {
                 int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
                 if (dataLen > 0) {
                     std::string path(pkg->data, dataLen);
-                    Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Starting file monitor on " + path);
+                    LOG_INFO("Starting file monitor on " + path);
                     std::wstring wPath = UTF8ToWide(path);
                     
                     // 启动监控线程 (简单实现，仅监控文件名变更)
@@ -686,7 +696,7 @@ namespace Formidable {
 
     void HandleConnection(ConnectionContext* ctx) {
         ctx->bConnected->store(true);
-        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Connected to " + ctx->serverIp);
+        LOG_INFO("Connected to " + ctx->serverIp);
         ClientInfo info;
         GetClientInfo(info);
         SendPkg(ctx->s, &info, sizeof(ClientInfo));
@@ -733,7 +743,7 @@ namespace Formidable {
         
         ctx->bConnected->store(false);
         Formidable::Client::Core::AutomationManager::RemoveTask(hbTaskId);
-        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, "Disconnected");
+        LOG_WARNING("Disconnected");
     }
 
     void RunClientLoop(std::atomic<bool>& bShouldExit, std::atomic<bool>& bConnected) {
@@ -783,7 +793,7 @@ namespace Formidable {
                 addr.sin_port = htons(port);
                 inet_pton(AF_INET, serverIp.c_str(), &addr.sin_addr);
 
-                Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Attempting " + std::string(g_ServerConfig.protoType == 1 ? "UDP" : "TCP") + " connection to " + serverIp);
+                LOG_INFO("Attempting " + std::string(g_ServerConfig.protoType == 1 ? "UDP" : "TCP") + " connection to " + serverIp);
 
                 if (g_ServerConfig.protoType == 1) {
                     // UDP "connection" - just handle it

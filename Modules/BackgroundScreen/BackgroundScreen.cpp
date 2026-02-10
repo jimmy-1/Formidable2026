@@ -411,22 +411,36 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
                 }
             }
 
+            INPUT input = { 0 };
+            input.type = INPUT_MOUSE;
+
             switch (data->type) {
                 case 0: // Mouse Move
-                    SetCursorPos(realX, realY);
+                    input.mi.dx = realX * 65535 / GetSystemMetrics(SM_CXSCREEN);
+                    input.mi.dy = realY * 65535 / GetSystemMetrics(SM_CYSCREEN);
+                    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+                    SendInput(1, &input, sizeof(INPUT));
                     break;
                 case 1: // Mouse Left Down
-                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-                    break;
                 case 2: // Mouse Left Up
-                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                    break;
                 case 3: // Mouse Right Down
-                    mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                    break;
                 case 4: // Mouse Right Up
-                    mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                {
+                    INPUT inputs[2] = { 0 };
+                    inputs[0].type = INPUT_MOUSE;
+                    inputs[0].mi.dx = realX * 65535 / GetSystemMetrics(SM_CXSCREEN);
+                    inputs[0].mi.dy = realY * 65535 / GetSystemMetrics(SM_CYSCREEN);
+                    inputs[0].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+
+                    inputs[1].type = INPUT_MOUSE;
+                    if (data->type == 1) inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+                    else if (data->type == 2) inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+                    else if (data->type == 3) inputs[1].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+                    else if (data->type == 4) inputs[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+
+                    SendInput(2, inputs, sizeof(INPUT));
                     break;
+                }
                 case 5: // Key Down
                     keybd_event((BYTE)data->arg1, 0, 0, 0);
                     break;

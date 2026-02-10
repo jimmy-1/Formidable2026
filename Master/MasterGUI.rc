@@ -195,9 +195,10 @@ STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFR
 CAPTION "文件管理"
 FONT 9, "Microsoft YaHei UI", 400, 0, 0x1
 BEGIN
-    CONTROL         "路径显示", IDC_STATIC_NAV_BAR, "Static", SS_LEFT, 0, 0, 760, 30
-    COMBOBOX        IDC_COMBO_NAV_PATH, 8, 6, 600, 120, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
-    EDITTEXT        IDC_EDIT_NAV_SEARCH, 614, 6, 138, 18, ES_AUTOHSCROLL
+    CONTROL         "路径显示", IDC_STATIC_NAV_BAR, "Static", SS_LEFT, 0, 0, 760, 31
+    COMBOBOX        IDC_COMBO_NAV_PATH, 45, 6, 560, 120, CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    EDITTEXT        IDC_EDIT_NAV_SEARCH, 614, 6, 138, 18, ES_AUTOHSCROLL | WS_TABSTOP
+    DEFPUSHBUTTON   "", IDOK, -10, -10, 0, 0, NOT WS_VISIBLE | WS_DISABLED | WS_TABSTOP
 
     PUSHBUTTON      "返回", IDC_BTN_FILE_REMOTE_BACK, 8, 34, 54, 24
     PUSHBUTTON      "新建文件夹", IDC_BTN_FILE_REMOTE_MKDIR, 66, 34, 70, 24
@@ -206,9 +207,9 @@ BEGIN
     PUSHBUTTON      "刷新", IDC_BTN_FILE_REMOTE_REFRESH, 256, 34, 54, 24
     PUSHBUTTON      "视图", IDC_BTN_FILE_VIEW, 314, 34, 54, 24
 
-    CONTROL         "", IDC_TREE_NAV, "SysTreeView32", TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | WS_BORDER | WS_TABSTOP, 6, 64, 180, 340
-    CONTROL         "", IDC_PANEL_DRIVES, "Static", SS_BITMAP | WS_BORDER, 192, 64, 560, 340
-    CONTROL         "", IDC_LIST_FILE_REMOTE, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 192, 64, 560, 340
+    CONTROL         "", IDC_TREE_NAV, "SysTreeView32", TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | WS_BORDER | WS_TABSTOP, 6, 60, 180, 344
+    CONTROL         "", IDC_PANEL_DRIVES, "Static", SS_BITMAP | WS_BORDER, 192, 60, 560, 344
+    CONTROL         "", IDC_LIST_FILE_REMOTE, "SysListView32", LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 192, 60, 560, 344
 
     CONTROL         "", IDC_STATUS_FILE_BAR, "msctls_statusbar32", WS_CHILD | WS_VISIBLE | CCS_BOTTOM | SBARS_SIZEGRIP, 0, 440, 760, 20
 END
@@ -254,47 +255,47 @@ BEGIN
 END
 // 二进制资源 - x86
 #if defined(_DEBUG)
-IDR_CLIENT_EXE          BIN     "Client.exe"
-IDR_NIM_CLIENT_EXE_X86  BIN     "..\\Formidable2026\\x86\\FormidableNim_Debug.exe"
-IDR_MOD_PROCESS         BIN     "ModuleProcessManager.dll"
-IDR_MOD_SYSTEM          BIN     "ModuleSystemInfo.dll"
-IDR_MOD_TERMINAL        BIN     "ModuleTerminal.dll"
-IDR_MOD_WINDOW          BIN     "ModuleWindowManager.dll"
-IDR_MOD_FILE            BIN     "ModuleFileManager.dll"
-IDR_MOD_SERVICE         BIN     "ModuleServiceManager.dll"
-IDR_MOD_REGISTRY        BIN     "ModuleRegistryManager.dll"
-IDR_MOD_MULTIMEDIA      BIN     "ModuleMultimedia.dll"
-IDR_MOD_NETWORK         BIN     "NetworkManager.dll"
-IDR_MOD_BACKGROUND_SCREEN BIN     "BackgroundScreen.dll"
-#else
-IDR_CLIENT_EXE          BIN     "..\\Formidable2026\\x86\\Client.exe"
+IDR_CLIENT_EXE_X86      BIN     "..\\Formidable2026\\x86\\Client.exe"
 IDR_NIM_CLIENT_EXE_X86  BIN     "..\\Formidable2026\\x86\\FormidableNim.exe"
-IDR_MOD_PROCESS         BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
-IDR_MOD_SYSTEM          BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
-IDR_MOD_TERMINAL        BIN     "..\\Formidable2026\\x86\\Terminal.dll"
-IDR_MOD_WINDOW          BIN     "..\\Formidable2026\\x86\\WindowManager.dll"
-IDR_MOD_FILE            BIN     "..\\Formidable2026\\x86\\FileManager.dll"
-IDR_MOD_SERVICE         BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
-IDR_MOD_REGISTRY        BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
-IDR_MOD_MULTIMEDIA      BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
-IDR_MOD_NETWORK         BIN     "..\\Formidable2026\\x86\\NetworkManager.dll"
+IDR_MOD_PROCESS_X86     BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
+IDR_MOD_SYSTEM_X86      BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
+IDR_MOD_TERMINAL_X86    BIN     "..\\Formidable2026\\x86\\Terminal.dll"
+IDR_MOD_WINDOW_X86      BIN     "..\\Formidable2026\\x86\\WindowManager.dll"
+IDR_MOD_FILE_X86        BIN     "..\\Formidable2026\\x86\\FileManager.dll"
+IDR_MOD_SERVICE_X86     BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
+IDR_MOD_REGISTRY_X86    BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
+IDR_MOD_MULTIMEDIA_X86  BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
+IDR_MOD_NETWORK_X86     BIN     "..\\Formidable2026\\x86\\NetworkManager.dll"
+IDR_MOD_BACKGROUND_SCREEN BIN     "..\\Formidable2026\\x86\\BackgroundScreen.dll"
+#else
+IDR_CLIENT_EXE_X86      BIN     "..\\Formidable2026\\x86\\Client.exe"
+IDR_NIM_CLIENT_EXE_X86  BIN     "..\\Formidable2026\\x86\\FormidableNim.exe"
+IDR_MOD_PROCESS_X86     BIN     "..\\Formidable2026\\x86\\ProcessManager.dll"
+IDR_MOD_SYSTEM_X86      BIN     "..\\Formidable2026\\x86\\SystemInfo.dll"
+IDR_MOD_TERMINAL_X86    BIN     "..\\Formidable2026\\x86\\Terminal.dll"
+IDR_MOD_WINDOW_X86      BIN     "..\\Formidable2026\\x86\\WindowManager.dll"
+IDR_MOD_FILE_X86        BIN     "..\\Formidable2026\\x86\\FileManager.dll"
+IDR_MOD_SERVICE_X86     BIN     "..\\Formidable2026\\x86\\ServiceManager.dll"
+IDR_MOD_REGISTRY_X86    BIN     "..\\Formidable2026\\x86\\RegistryManager.dll"
+IDR_MOD_MULTIMEDIA_X86  BIN     "..\\Formidable2026\\x86\\Multimedia.dll"
+IDR_MOD_NETWORK_X86     BIN     "..\\Formidable2026\\x86\\NetworkManager.dll"
 IDR_MOD_BACKGROUND_SCREEN BIN     "..\\Formidable2026\\x86\\BackgroundScreen.dll"
 #endif
 
 // 二进制资源 - x64
 #if defined(_DEBUG)
-IDR_CLIENT_EXE_X64      BIN     "Client.exe"
-IDR_NIM_CLIENT_EXE_X64  BIN     "..\\Formidable2026\\x64\\FormidableNim_Debug.exe"
-IDR_MOD_PROCESS_X64     BIN     "ModuleProcessManager.dll"
-IDR_MOD_SYSTEM_X64      BIN     "ModuleSystemInfo.dll"
-IDR_MOD_TERMINAL_X64    BIN     "ModuleTerminal.dll"
-IDR_MOD_WINDOW_X64      BIN     "ModuleWindowManager.dll"
-IDR_MOD_FILE_X64        BIN     "ModuleFileManager.dll"
-IDR_MOD_SERVICE_X64     BIN     "ModuleServiceManager.dll"
-IDR_MOD_REGISTRY_X64    BIN     "ModuleRegistryManager.dll"
-IDR_MOD_MULTIMEDIA_X64  BIN     "ModuleMultimedia.dll"
-IDR_MOD_NETWORK_X64     BIN     "NetworkManager.dll"
-IDR_MOD_BACKGROUND_SCREEN_X64 BIN     "BackgroundScreen.dll"
+IDR_CLIENT_EXE_X64      BIN     "..\\Formidable2026\\x64\\Client.exe"
+IDR_NIM_CLIENT_EXE_X64  BIN     "..\\Formidable2026\\x64\\FormidableNim.exe"
+IDR_MOD_PROCESS_X64     BIN     "..\\Formidable2026\\x64\\ProcessManager.dll"
+IDR_MOD_SYSTEM_X64      BIN     "..\\Formidable2026\\x64\\SystemInfo.dll"
+IDR_MOD_TERMINAL_X64    BIN     "..\\Formidable2026\\x64\\Terminal.dll"
+IDR_MOD_WINDOW_X64      BIN     "..\\Formidable2026\\x64\\WindowManager.dll"
+IDR_MOD_FILE_X64        BIN     "..\\Formidable2026\\x64\\FileManager.dll"
+IDR_MOD_SERVICE_X64     BIN     "..\\Formidable2026\\x64\\ServiceManager.dll"
+IDR_MOD_REGISTRY_X64    BIN     "..\\Formidable2026\\x64\\RegistryManager.dll"
+IDR_MOD_MULTIMEDIA_X64  BIN     "..\\Formidable2026\\x64\\Multimedia.dll"
+IDR_MOD_NETWORK_X64     BIN     "..\\Formidable2026\\x64\\NetworkManager.dll"
+IDR_MOD_BACKGROUND_SCREEN_X64 BIN     "..\\Formidable2026\\x64\\BackgroundScreen.dll"
 #else
 IDR_CLIENT_EXE_X64      BIN     "..\\Formidable2026\\x64\\Client.exe"
 IDR_NIM_CLIENT_EXE_X64  BIN     "..\\Formidable2026\\x64\\FormidableNim.exe"

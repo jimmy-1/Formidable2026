@@ -116,10 +116,11 @@ LRESULT CALLBACK BackgroundScreenProc(HWND hWnd, UINT message, WPARAM wParam, LP
                 shouldSend = true;
                 break;
             case WM_LBUTTONDOWN:
+            case WM_LBUTTONDBLCLK:
                 if (!state.isControlEnabled) {
                     return DefSubclassProc(hWnd, message, wParam, lParam);
                 }
-                cmdData.type = 1;
+                cmdData.type = 1; // Always send as DOWN
                 shouldSend = true;
                 break;
             case WM_LBUTTONUP:
@@ -130,11 +131,12 @@ LRESULT CALLBACK BackgroundScreenProc(HWND hWnd, UINT message, WPARAM wParam, LP
                 shouldSend = true;
                 break;
             case WM_RBUTTONDOWN:
+            case WM_RBUTTONDBLCLK:
                 if (!state.isControlEnabled) {
                     // 如果未启用控制，右键点击允许弹出菜单
                     return DefSubclassProc(hWnd, message, wParam, lParam);
                 }
-                cmdData.type = 3;
+                cmdData.type = 3; // Always send as DOWN
                 shouldSend = true;
                 break;
             case WM_RBUTTONUP:
@@ -211,6 +213,10 @@ INT_PTR CALLBACK BackgroundDialog::DlgProc(HWND hDlg, UINT message, WPARAM wPara
             // 子类化屏幕显示控件
             HWND hStatic = GetDlgItem(hDlg, IDC_STATIC_BACK_SCREEN);
             if (hStatic) {
+                // 确保静态控件可以接收鼠标消息
+                LONG style = GetWindowLong(hStatic, GWL_STYLE);
+                SetWindowLong(hStatic, GWL_STYLE, style | SS_NOTIFY);
+
                 SetWindowSubclass(hStatic, BackgroundScreenProc, clientId, (DWORD_PTR)hDlg);
             }
 

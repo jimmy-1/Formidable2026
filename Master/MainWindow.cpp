@@ -21,6 +21,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <commdlg.h>
+#include <uxtheme.h>
+#pragma comment(lib, "uxtheme.lib")
 #include <ctime>
 #include <fstream>
 #include <gdiplus.h>
@@ -48,6 +50,8 @@
 #include "UI/BuilderDialog.h"
 #include "Utils/StringHelper.h"
 #include "Server/Utils/Logger.h"
+#include <uxtheme.h>
+#pragma comment(lib, "uxtheme.lib")
 
 using namespace Formidable;
 using namespace Formidable::Utils;
@@ -96,17 +100,33 @@ static LRESULT HandleToolbarCustomDraw(HWND hToolbar, NMTBCUSTOMDRAW* cd) {
     if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
         HDC hdc = cd->nmcd.hdc;
         RECT rc = cd->nmcd.rc;
-        Graphics g(hdc);
+        
+        // Double buffering to prevent flickering
+        HDC hMemDC = CreateCompatibleDC(hdc);
+        HBITMAP hMemBmp = CreateCompatibleBitmap(hdc, rc.right - rc.left, rc.bottom - rc.top);
+        HBITMAP hOldBmp = (HBITMAP)SelectObject(hMemDC, hMemBmp);
+        
+        // Adjust rect for memory DC (start at 0,0)
+        RECT rcMem = rc;
+        OffsetRect(&rcMem, -rc.left, -rc.top);
+        
+        // Fill background with toolbar color
+        HBRUSH hBr = GetSysColorBrush(COLOR_BTNFACE);
+        FillRect(hMemDC, &rcMem, hBr);
+        
+        Graphics g(hMemDC);
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         COLORREF accent = GetSysColor(COLOR_HIGHLIGHT);
         bool hot = (cd->nmcd.uItemState & CDIS_HOT) != 0 || (int)cd->nmcd.dwItemSpec == s_toolbarHotId;
         bool pressed = (cd->nmcd.uItemState & CDIS_SELECTED) != 0;
+        
         if (hot || pressed) {
-            RectF shadowRect((REAL)rc.left + 1.0f, (REAL)rc.top + 2.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 3));
+            RectF shadowRect((REAL)rcMem.left + 1.0f, (REAL)rcMem.top + 2.0f, (REAL)(rcMem.right - rcMem.left - 2), (REAL)(rcMem.bottom - rcMem.top - 3));
             FillRoundRect(g, shadowRect, 8.0f, MakeColor(28, RGB(0, 0, 0)));
-            RectF fillRect((REAL)rc.left + 1.0f, (REAL)rc.top + 1.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 2));
+            RectF fillRect((REAL)rcMem.left + 1.0f, (REAL)rcMem.top + 1.0f, (REAL)(rcMem.right - rcMem.left - 2), (REAL)(rcMem.bottom - rcMem.top - 2));
             FillRoundRect(g, fillRect, 8.0f, MakeColor(pressed ? 70 : 40, accent));
         }
+        
         int cmdId = (int)cd->nmcd.dwItemSpec;
         int index = (int)SendMessageW(hToolbar, TB_COMMANDTOINDEX, cmdId, 0);
         TBBUTTON btn = { 0 };
@@ -114,21 +134,31 @@ static LRESULT HandleToolbarCustomDraw(HWND hToolbar, NMTBCUSTOMDRAW* cd) {
         HIMAGELIST hImg = (HIMAGELIST)SendMessageW(hToolbar, TB_GETIMAGELIST, 0, 0);
         int iconSize = 32;
         int paddingTop = 6;
-        int iconX = rc.left + (rc.right - rc.left - iconSize) / 2;
-        int iconY = rc.top + paddingTop;
+        int iconX = rcMem.left + (rcMem.right - rcMem.left - iconSize) / 2;
+        int iconY = rcMem.top + paddingTop;
+        
         if (hImg) {
-            ImageList_Draw(hImg, btn.iBitmap, hdc, iconX, iconY, ILD_NORMAL);
+            ImageList_Draw(hImg, btn.iBitmap, hMemDC, iconX, iconY, ILD_NORMAL);
         }
+        
         wchar_t text[64] = { 0 };
         SendMessageW(hToolbar, TB_GETBUTTONTEXTW, cmdId, (LPARAM)text);
         HFONT hFont = (HFONT)SendMessageW(hToolbar, WM_GETFONT, 0, 0);
-        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
-        RECT rcText = rc;
+        HFONT hOldFont = (HFONT)SelectObject(hMemDC, hFont);
+        SetBkMode(hMemDC, TRANSPARENT);
+        SetTextColor(hMemDC, GetSysColor(COLOR_BTNTEXT));
+        RECT rcText = rcMem;
         rcText.top = iconY + iconSize + 2;
-        DrawTextW(hdc, text, -1, &rcText, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-        SelectObject(hdc, hOld);
+        DrawTextW(hMemDC, text, -1, &rcText, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        SelectObject(hMemDC, hOldFont);
+        
+        // Copy back to screen
+        BitBlt(hdc, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, hMemDC, 0, 0, SRCCOPY);
+        
+        SelectObject(hMemDC, hOldBmp);
+        DeleteObject(hMemBmp);
+        DeleteDC(hMemDC);
+        
         return CDRF_SKIPDEFAULT;
     }
     return CDRF_DODEFAULT;
@@ -147,31 +177,44 @@ static LRESULT HandleTabCustomDraw(HWND hTab, NMCUSTOMDRAW* cd) {
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         COLORREF accent = GetSysColor(COLOR_HIGHLIGHT);
         int curSel = TabCtrl_GetCurSel(hTab);
-        POINT pt;
-        GetCursorPos(&pt);
-        ScreenToClient(hTab, &pt);
-        TCHITTESTINFO ht = { 0 };
-        ht.pt = pt;
-        int hotIndex = TabCtrl_HitTest(hTab, &ht);
-        bool hot = hotIndex == index;
+        
         bool selected = curSel == index;
-        RectF fillRect((REAL)rc.left + 1.0f, (REAL)rc.top + 2.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 3));
-        if (hot || selected) {
-            FillRoundRect(g, fillRect, 8.0f, MakeColor(selected ? 55 : 30, accent));
+        
+        // Win11 Style: Clean background, Blue underline for selected
+        SolidBrush bgBrush(Color(255, 255, 255, 255)); // White background
+        g.FillRectangle(&bgBrush, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+
+        if (selected) {
+            // Blue underline
+            RectF underline((REAL)rc.left + 8.0f, (REAL)rc.bottom - 3.0f, (REAL)(rc.right - rc.left - 16), 3.0f);
+            SolidBrush brush(MakeColor(255, accent));
+            g.FillRectangle(&brush, underline);
         }
+
         wchar_t text[128] = { 0 };
         TCITEMW item = { 0 };
         item.mask = TCIF_TEXT;
         item.pszText = text;
         item.cchTextMax = 128;
         TabCtrl_GetItem(hTab, index, &item);
+        
         HFONT hFont = (HFONT)SendMessageW(hTab, WM_GETFONT, 0, 0);
-        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+        LOGFONTW lf;
+        GetObjectW(hFont, sizeof(lf), &lf);
+        if (selected) lf.lfWeight = FW_BOLD; // Bold for selected
+        HFONT hNewFont = CreateFontIndirectW(&lf);
+        HFONT hOld = (HFONT)SelectObject(hdc, hNewFont);
+        
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+        SetTextColor(hdc, selected ? accent : GetSysColor(COLOR_BTNTEXT)); // Colored text for selected
+        
         RECT rcText = rc;
+        rcText.top += 2; // Slight adjustment
         DrawTextW(hdc, text, -1, &rcText, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        
         SelectObject(hdc, hOld);
+        DeleteObject(hNewFont);
+        
         return CDRF_SKIPDEFAULT;
     }
     return CDRF_DODEFAULT;
@@ -371,7 +414,7 @@ void UpdateStatusBar() {
         }
     }
     
-    std::wstring status = L" 在线: " + ToWString(activeClients) + L"/" + ToWString(totalClients);
+    std::wstring status = L" 在线: " + ToWString(activeClients);
     SendMessageW(g_hStatusBar, SB_SETTEXTW, 0, (LPARAM)status.c_str());
     
     SYSTEMTIME st;
@@ -466,6 +509,7 @@ void RestartMaster(HWND hWnd) {
 
 // 从main_gui.cpp提取：ListView初始化
 void InitListView(HWND hList) {
+    SetWindowTheme(hList, L"Explorer", NULL); // Win11 Style
     const wchar_t* columns[] = { 
         L"IP", L"端口", L"地理位置", L"LAN地址", L"计算机名", 
         L"用户名/组名", L"操作系统", L"RTT", L"版本", 
@@ -1429,6 +1473,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         g_hListLogs = CreateWindowExW(0, WC_LISTVIEWW, L"", 
             WS_CHILD | WS_VISIBLE | LVS_REPORT, 
             0, 0, 0, 0, hWnd, (HMENU)IDC_LIST_LOGS, g_hInstance, NULL);
+        SetWindowTheme(g_hListLogs, L"Explorer", NULL); // Win11 Style
         ListView_SetExtendedListViewStyle(g_hListLogs, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
         
         LVCOLUMNW lvc = { 0 };

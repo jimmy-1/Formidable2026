@@ -41,80 +41,80 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <NMakeBuildCommandLine Condition="'$(Platform)'=='Win32'">
-      if not exist tools\Pe2Bin.exe cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:i386 --cc:vcc -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:debug --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:i386 -o:$(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:i386 --cc:vcc -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:i386 --cc:vcc -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:i386 --cc:vcc -o:$(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe src\loader.nim
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine Condition="'$(Platform)'=='Win32'">
-      cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:i386 --cc:vcc -f -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:debug --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:i386 -f -o:$(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:i386 --cc:vcc -f -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:i386 --cc:vcc -f -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:i386 --cc:vcc -f -o:$(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe src\loader.nim
     </NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine Condition="'$(Platform)'=='Win32'">del $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.lib $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exp src\payload.dll src\payload.bin src\payload.res src\payload.lib src\payload.exp tools\Pe2Bin.exe</NMakeCleanCommandLine>
+    <NMakeCleanCommandLine Condition="'$(Platform)'=='Win32'">del $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.lib $(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exp src\payload_build.dll src\payload_build.bin src\runner_build.exe src\*.exp src\*.lib</NMakeCleanCommandLine>
     <NMakeOutput Condition="'$(Platform)'=='Win32'">$(SolutionDir)Formidable2026\x86\FormidableNim_Debug.exe</NMakeOutput>
     <NMakeBuildCommandLine Condition="'$(Platform)'=='x64'">
-      if not exist tools\Pe2Bin.exe cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:amd64 --cc:vcc -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:debug --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:amd64 -o:$(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:amd64 --cc:vcc -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:amd64 --cc:vcc -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:amd64 --cc:vcc -o:$(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe src\loader.nim
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine Condition="'$(Platform)'=='x64'">
-      cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:amd64 --cc:vcc -f -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:debug --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:amd64 -f -o:$(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:lib --nomain --cpu:amd64 --cc:vcc -f -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:amd64 --cc:vcc -f -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:debug --app:gui --cpu:amd64 --cc:vcc -f -o:$(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe src\loader.nim
     </NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine Condition="'$(Platform)'=='x64'">del $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.lib $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exp src\payload.dll src\payload.bin src\payload.res src\payload.lib src\payload.exp tools\Pe2Bin.exe</NMakeCleanCommandLine>
+    <NMakeCleanCommandLine Condition="'$(Platform)'=='x64'">del $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.lib $(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exp src\payload_build.dll src\payload_build.bin src\runner_build.exe src\*.exp src\*.lib</NMakeCleanCommandLine>
     <NMakeOutput Condition="'$(Platform)'=='x64'">$(SolutionDir)Formidable2026\x64\FormidableNim_Debug.exe</NMakeOutput>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
     <NMakeBuildCommandLine Condition="'$(Platform)'=='Win32'">
-      if not exist tools\Pe2Bin.exe cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:i386 --cc:vcc -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:release --opt:size --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:i386 -o:$(SolutionDir)Formidable2026\x86\FormidableNim.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:i386 --cc:vcc -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:i386 --cc:vcc -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:i386 --cc:vcc -o:$(SolutionDir)Formidable2026\x86\FormidableNim.exe src\loader.nim
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine Condition="'$(Platform)'=='Win32'">
-      cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:i386 --cc:vcc -f -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:release --opt:size --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:i386 -f -o:$(SolutionDir)Formidable2026\x86\FormidableNim.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:i386 --cc:vcc -f -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:i386 --cc:vcc -f -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:i386 --cc:vcc -f -o:$(SolutionDir)Formidable2026\x86\FormidableNim.exe src\loader.nim
     </NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine Condition="'$(Platform)'=='Win32'">del $(SolutionDir)Formidable2026\x86\FormidableNim.exe $(SolutionDir)Formidable2026\x86\FormidableNim.lib $(SolutionDir)Formidable2026\x86\FormidableNim.exp src\payload.dll src\payload.bin src\payload.res src\payload.lib src\payload.exp tools\Pe2Bin.exe</NMakeCleanCommandLine>
+    <NMakeCleanCommandLine Condition="'$(Platform)'=='Win32'">del $(SolutionDir)Formidable2026\x86\FormidableNim.exe $(SolutionDir)Formidable2026\x86\FormidableNim.lib $(SolutionDir)Formidable2026\x86\FormidableNim.exp src\payload_build.dll src\payload_build.bin src\runner_build.exe src\*.exp src\*.lib</NMakeCleanCommandLine>
     <NMakeOutput Condition="'$(Platform)'=='Win32'">$(SolutionDir)Formidable2026\x86\FormidableNim.exe</NMakeOutput>
     <NMakeBuildCommandLine Condition="'$(Platform)'=='x64'">
-      if not exist tools\Pe2Bin.exe cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:amd64 --cc:vcc -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:release --opt:size --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:amd64 -o:$(SolutionDir)Formidable2026\x64\FormidableNim.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:amd64 --cc:vcc -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:amd64 --cc:vcc -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:amd64 --cc:vcc -o:$(SolutionDir)Formidable2026\x64\FormidableNim.exe src\loader.nim
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine Condition="'$(Platform)'=='x64'">
-      cl.exe /EHsc /Fetools\Pe2Bin.exe tools\Pe2Bin.cpp
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:amd64 --cc:vcc -f -o:src\payload.dll src\payload.nim
-      tools\Pe2Bin.exe src\payload.dll src\payload.bin
-      rc.exe /fo src\payload.res src\payload.rc
-      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c --cc:vcc -d:release --opt:size --passL:"-link /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup" --cpu:amd64 -f -o:$(SolutionDir)Formidable2026\x64\FormidableNim.exe src\nim_client.nim
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:lib --nomain --cpu:amd64 --cc:vcc -f -o:src\payload_build.dll src\nim_dll.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:amd64 --cc:vcc -f -o:src\runner_build.exe src\runner.nim
+      if %errorlevel% neq 0 exit /b %errorlevel%
+      $(SolutionDir)tools\nim-2.2.0\bin\nim.exe c -d:release --app:gui --cpu:amd64 --cc:vcc -f -o:$(SolutionDir)Formidable2026\x64\FormidableNim.exe src\loader.nim
     </NMakeReBuildCommandLine>
-    <NMakeCleanCommandLine Condition="'$(Platform)'=='x64'">del $(SolutionDir)Formidable2026\x64\FormidableNim.exe $(SolutionDir)Formidable2026\x64\FormidableNim.lib $(SolutionDir)Formidable2026\x64\FormidableNim.exp src\payload.dll src\payload.bin src\payload.res src\payload.lib src\payload.exp tools\Pe2Bin.exe</NMakeCleanCommandLine>
+    <NMakeCleanCommandLine Condition="'$(Platform)'=='x64'">del $(SolutionDir)Formidable2026\x64\FormidableNim.exe $(SolutionDir)Formidable2026\x64\FormidableNim.lib $(SolutionDir)Formidable2026\x64\FormidableNim.exp src\payload_build.dll src\payload_build.bin src\runner_build.exe src\*.exp src\*.lib</NMakeCleanCommandLine>
     <NMakeOutput Condition="'$(Platform)'=='x64'">$(SolutionDir)Formidable2026\x64\FormidableNim.exe</NMakeOutput>
   </PropertyGroup>
   <ItemDefinitionGroup>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <None Include="src\nim_client.nim" />
+    <None Include="src\loader.nim" />
+    <None Include="src\runner.nim" />
+    <None Include="src\nim_dll.nim" />
     <None Include="src\amsi_patch.nim" />
     <None Include="src\etw_patch.nim" />
-    <None Include="src\syscalls.nim" />
-    <None Include="src\shellcode_loader.nim" />
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

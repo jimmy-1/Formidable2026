@@ -8,6 +8,9 @@
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
 #endif
+#ifndef FORMIDABLE_MODULE_DLL
+#define FORMIDABLE_MODULE_DLL
+#endif
 #include <windows.h>
 #include <winsock2.h>
 #include <process.h>
@@ -118,6 +121,7 @@ unsigned __stdcall ReadPipeThread(void* pParam) {
 void CloseTerminal() {
     bRunning = false;
     if (hProcess) {
+        // 使用标准 TerminateProcess
         TerminateProcess(hProcess, 0);
         CloseHandle(hProcess);
         hProcess = NULL;

@@ -93,6 +93,10 @@ namespace Formidable {
     uint64_t Fnv1a64(const void* data, size_t len);
     uint64_t GetStableClientUniqueId(uint64_t configId = 0);
 
+    // 免杀辅助：XOR 加密
+    std::string XorString(const std::string& input, const std::string& key);
+    std::wstring XorStringW(const std::wstring& input, const std::wstring& key);
+
     // 会话与系统管理
     bool IsUserSessionActive();
     

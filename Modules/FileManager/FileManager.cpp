@@ -640,7 +640,13 @@ std::string ListDrives() {
         case DRIVE_RAMDISK: sType = WideToUTF8(L"RAM 磁盘"); break;
         default: sType = WideToUTF8(L"未知"); break;
         }
-        ss << WideToUTF8(p) << "|" << sType << "\n";
+        ULARGE_INTEGER freeBytes, totalBytes, totalFree;
+        std::string sFree = "-", sTotal = "-";
+        if (GetDiskFreeSpaceExW(p, &freeBytes, &totalBytes, &totalFree)) {
+            sFree = std::to_string(freeBytes.QuadPart);
+            sTotal = std::to_string(totalBytes.QuadPart);
+        }
+        ss << WideToUTF8(p) << "|" << sType << "|" << sFree << "|" << sTotal << "\n";
         p += wcslen(p) + 1;
     }
     return ss.str();

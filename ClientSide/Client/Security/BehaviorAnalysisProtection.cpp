@@ -1,5 +1,15 @@
 ﻿#include "BehaviorAnalysisProtection.h"
+
+// 只有在非 DLL 模块编译时才包含 Logger，或者在 DLL 模块中禁用日志
+#ifndef FORMIDABLE_MODULE_DLL
 #include "../Utils/Logger.h"
+#define LOG_INFO(msg) Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, msg)
+#define LOG_WARNING(msg) Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, msg)
+#else
+#define LOG_INFO(msg) 
+#define LOG_WARNING(msg)
+#endif
+
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
 #endif
@@ -49,19 +59,19 @@ bool IsDebugged() {
 }
 
 void BehaviorAnalysisProtection::InitializeProtection() {
-    Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_INFO, "Initializing Behavior Analysis Protection");
+    LOG_INFO("Initializing Behavior Analysis Protection");
     // Initialize random seed or other helpers
 }
 
 void BehaviorAnalysisProtection::ProtectAgainstAnalysis() {
     if (IsDebugged()) {
-        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, "Debugger detected! Exiting.");
+        LOG_WARNING("Debugger detected! Exiting.");
         // Subtle exit or infinite loop
         ExitProcess(0); 
     }
 
     if (IsRunningInVM()) {
-        Formidable::Client::Utils::Logger::Log(Formidable::Client::Utils::LogLevel::LL_WARNING, "VM detected! Continuing with caution.");
+        LOG_WARNING("VM detected! Continuing with caution.");
         // Decide whether to run or reduce functionality
         // For now, we continue but might log or change behavior
         // ExitProcess(0); // Optional: Exit if VM detected

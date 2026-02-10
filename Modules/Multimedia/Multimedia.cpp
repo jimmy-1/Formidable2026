@@ -191,6 +191,29 @@ bool GetDirtyRect(const BYTE* current, const BYTE* prev, int width, int height, 
 }
 
 
+// 辅助函数：绘制鼠标光标，避免使用 CAPTUREBLT 导致的闪烁
+void DrawMouseCursor(HDC hMemDC, int screenX, int screenY, int width, int height, int targetWidth, int targetHeight) {
+    CURSORINFO ci = { sizeof(CURSORINFO) };
+    if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING)) {
+        ICONINFO ii = { 0 };
+        if (GetIconInfo((HICON)ci.hCursor, &ii)) {
+            int cursorX = ci.ptScreenPos.x - screenX - ii.xHotspot;
+            int cursorY = ci.ptScreenPos.y - screenY - ii.yHotspot;
+
+            // 如果有缩放，需要调整坐标
+            if (targetWidth != width || targetHeight != height) {
+                cursorX = (int)(cursorX * (double)targetWidth / width);
+                cursorY = (int)(cursorY * (double)targetHeight / height);
+            }
+
+            DrawIconEx(hMemDC, cursorX, cursorY, (HICON)ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
+            
+            if (ii.hbmMask) DeleteObject(ii.hbmMask);
+            if (ii.hbmColor) DeleteObject(ii.hbmColor);
+        }
+    }
+}
+
 // 发送响应数据到主控端（Master）
 bool SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
     PkgHeader header;
@@ -537,10 +560,15 @@ void ScreenThread(SOCKET s) {
         
         // 执行截屏
         if (targetWidth == width && targetHeight == height) {
-            bltResult = BitBlt(hMemDC, 0, 0, width, height, hScreenDC, screenX, screenY, SRCCOPY | CAPTUREBLT);
+            bltResult = BitBlt(hMemDC, 0, 0, width, height, hScreenDC, screenX, screenY, SRCCOPY);
         } else {
             SetStretchBltMode(hMemDC, HALFTONE);
-            bltResult = StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, screenX, screenY, width, height, SRCCOPY | CAPTUREBLT);
+            bltResult = StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, screenX, screenY, width, height, SRCCOPY);
+        }
+
+        // 手动绘制鼠标光标，避免 CAPTUREBLT 导致的闪烁
+        if (bltResult) {
+            DrawMouseCursor(hMemDC, screenX, screenY, width, height, targetWidth, targetHeight);
         }
     }
 
@@ -1002,75 +1030,86 @@ static HDESK g_inputDesk = NULL;
 static DWORD g_lastThreadId = 0;
 static clock_t g_lastCheck = 0;
 
-void ProcessMouseEvent(RemoteMouseEvent* ev) {
-    if (Formidable::IsRunAsService()) {
-        const int CHECK_INTERVAL = 100;
-        clock_t now = clock();
-        if (!g_inputDesk || now - g_lastCheck > CHECK_INTERVAL) {
-            g_lastCheck = now;
-            if (Formidable::SwitchToDesktopIfChanged(g_inputDesk)) {
-                g_lastThreadId = 0;
-            }
-        }
-        if (g_inputDesk) {
-            DWORD currentThreadId = GetCurrentThreadId();
-            if (currentThreadId != g_lastThreadId) {
-                SetThreadDesktop(g_inputDesk);
-                g_lastThreadId = currentThreadId;
-            }
+void UpdateInputDesktop() {
+    if (!Formidable::IsRunAsService()) return;
+
+    const int CHECK_INTERVAL = 100; // 100ms 检查一次桌面切换
+    clock_t now = clock();
+    if (!g_inputDesk || now - g_lastCheck > CHECK_INTERVAL) {
+        g_lastCheck = now;
+        // 如果桌面发生了切换（例如用户切换到了锁定界面或 UAC 界面），更新全局句柄
+        if (Formidable::SwitchToDesktopIfChanged(g_inputDesk, GENERIC_ALL)) {
+            g_lastThreadId = 0; // 强制重新设置线程桌面
         }
     }
 
+    if (g_inputDesk) {
+        DWORD currentThreadId = GetCurrentThreadId();
+        if (currentThreadId != g_lastThreadId) {
+            if (SetThreadDesktop(g_inputDesk)) {
+                g_lastThreadId = currentThreadId;
+            } else {
+                OutputDebugStringA("[Multimedia] SetThreadDesktop failed\n");
+            }
+        }
+    }
+}
+
+void ProcessMouseEvent(RemoteMouseEvent* ev) {
+    UpdateInputDesktop();
+
     INPUT input = { 0 };
     input.type = INPUT_MOUSE;
-    
-    // 主控端已发送归一化坐标(0-65535)，直接使用
-    input.mi.dx = ev->x;
-    input.mi.dy = ev->y;
+    input.mi.dx = (LONG)ev->x;
+    input.mi.dy = (LONG)ev->y;
     input.mi.mouseData = ev->data;
-    // 必须包含 MOUSEEVENTF_MOVE，否则 MOUSEEVENTF_ABSOLUTE 坐标不会生效
-    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
+    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
+    // 默认都带上 MOVE，确保点击发生在正确的位置
+    input.mi.dwFlags |= MOUSEEVENTF_MOVE;
 
     switch (ev->msg) {
+    case WM_MOUSEMOVE:   /* 已经带了 MOVE 标志 */ break;
     case WM_LBUTTONDOWN: input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN; break;
     case WM_LBUTTONUP:   input.mi.dwFlags |= MOUSEEVENTF_LEFTUP; break;
     case WM_RBUTTONDOWN: input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN; break;
     case WM_RBUTTONUP:   input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP; break;
     case WM_MBUTTONDOWN: input.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN; break;
     case WM_MBUTTONUP:   input.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP; break;
-    case WM_MOUSEMOVE:   /* 已经包含 MOVE 标志 */ break;
     case WM_MOUSEWHEEL:  input.mi.dwFlags |= MOUSEEVENTF_WHEEL; break;
+    default: return; // 忽略其他消息
     }
 
-    SendInput(1, &input, sizeof(INPUT));
+    if (!SendInput(1, &input, sizeof(INPUT))) {
+        DWORD dwErr = GetLastError();
+        char buf[64];
+        sprintf_s(buf, "[Multimedia] SendInput Mouse failed: %d\n", dwErr);
+        OutputDebugStringA(buf);
+    }
 }
 
 void ProcessKeyEvent(RemoteKeyEvent* ev) {
-    if (Formidable::IsRunAsService()) {
-        // 确保键盘事件也在正确的桌面上
-        if (g_inputDesk) SetThreadDesktop(g_inputDesk);
-    }
+    UpdateInputDesktop();
 
     INPUT input = { 0 };
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = (WORD)ev->vk;
-    input.ki.wScan = MapVirtualKey((UINT)ev->vk, 0);
+    input.ki.wScan = (WORD)MapVirtualKey((UINT)ev->vk, 0);
+    input.ki.dwFlags = (ev->msg == WM_KEYUP || ev->msg == WM_SYSKEYUP) ? KEYEVENTF_KEYUP : 0;
     
-    if (ev->msg == WM_KEYUP || ev->msg == WM_SYSKEYUP) {
-        input.ki.dwFlags |= KEYEVENTF_KEYUP;
-    }
-    
-    // 检查是否是扩展键
-    switch (ev->vk) {
-    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
-    case VK_PRIOR:  case VK_NEXT:   case VK_LEFT: case VK_UP:
-    case VK_RIGHT:  case VK_DOWN:   case VK_DIVIDE: case VK_RMENU:
-    case VK_RCONTROL:
+    // 扩展键处理
+    if (ev->vk == VK_LEFT || ev->vk == VK_RIGHT || ev->vk == VK_UP || ev->vk == VK_DOWN ||
+        ev->vk == VK_PRIOR || ev->vk == VK_NEXT || ev->vk == VK_END || ev->vk == VK_HOME ||
+        ev->vk == VK_INSERT || ev->vk == VK_DELETE || ev->vk == VK_DIVIDE || ev->vk == VK_NUMLOCK) {
         input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-        break;
     }
 
-    SendInput(1, &input, sizeof(INPUT));
+    if (!SendInput(1, &input, sizeof(INPUT))) {
+        DWORD dwErr = GetLastError();
+        char buf[64];
+        sprintf_s(buf, "[Multimedia] SendInput Key failed: %d\n", dwErr);
+        OutputDebugStringA(buf);
+    }
 }
 
 extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {

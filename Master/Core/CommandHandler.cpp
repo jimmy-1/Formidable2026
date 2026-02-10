@@ -47,6 +47,8 @@ using namespace Gdiplus;
 using namespace Formidable;
 
 static std::map<uint32_t, int> s_screenLogState;
+static std::map<uint32_t, uint64_t> s_lastProgressTick;
+static std::mutex s_progressMutex;
 static const unsigned char kTransferKey[] = {
     0x3A, 0x7F, 0x12, 0x9C, 0x55, 0xE1, 0x08, 0x6D,
     0x4B, 0x90, 0x2E, 0xA7, 0x1C, 0xF3, 0xB5, 0x63
@@ -1049,8 +1051,20 @@ void CommandHandler::HandleFileData(uint32_t clientId, const Formidable::Command
         // Update progress
         client->currentDownloadSize += pkg->arg1;
         if (client->totalDownloadSize > 0) {
+            uint64_t now = GetTickCount64();
+            bool shouldUpdate = false;
+            {
+                std::lock_guard<std::mutex> lock(s_progressMutex);
+                if (now - s_lastProgressTick[clientId] >= 100) {
+                    s_lastProgressTick[clientId] = now;
+                    shouldUpdate = true;
+                }
+            }
+
             int progress = (int)((client->currentDownloadSize * 100) / client->totalDownloadSize);
-            PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, progress, (LPARAM)client->currentDownloadSize);
+            if (shouldUpdate || progress >= 100) {
+                PostMessageW(client->hFileDlg, WM_UPDATE_PROGRESS, progress, (LPARAM)client->currentDownloadSize);
+            }
         }
     }
 }

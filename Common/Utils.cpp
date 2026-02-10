@@ -768,6 +768,22 @@ namespace Formidable {
         return h;
     }
 
+    std::string XorString(const std::string& input, const std::string& key) {
+        std::string output = input;
+        for (size_t i = 0; i < input.size(); i++) {
+            output[i] = input[i] ^ key[i % key.size()];
+        }
+        return output;
+    }
+
+    std::wstring XorStringW(const std::wstring& input, const std::wstring& key) {
+        std::wstring output = input;
+        for (size_t i = 0; i < input.size(); i++) {
+            output[i] = input[i] ^ key[i % key.size()];
+        }
+        return output;
+    }
+
     bool IsUserSessionActive() {
         WTS_SESSION_INFOW* pSessions = NULL;
         DWORD count = 0;

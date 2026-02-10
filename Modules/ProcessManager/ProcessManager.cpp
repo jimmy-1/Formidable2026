@@ -5,6 +5,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef FORMIDABLE_MODULE_DLL
+#define FORMIDABLE_MODULE_DLL
+#endif
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
 #endif
@@ -148,7 +151,9 @@ void ListProcesses(SOCKET s) {
             std::string utf8Name = WideToUTF8(pe32.szExeFile);
             strncpy(info.name, utf8Name.c_str(), sizeof(info.name) - 1);
             
+            // 使用标准 OpenProcess
             HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, pe32.th32ProcessID);
+
             if (hProcess) {
                 // 获取内存信息
                 PROCESS_MEMORY_COUNTERS_EX pmc;
@@ -266,7 +271,22 @@ void ListProcessModules(SOCKET s, uint32_t pid) {
     SendResponse(s, CMD_PROCESS_MODULES, (uint32_t)(modules.size() * sizeof(ModuleInfo)), pid, modules.data(), (int)(modules.size() * sizeof(ModuleInfo)));
 }
 
-// KillProcess 已在 Utils.h 中声明并在 Utils.cpp 中实现，此处不再重复定义
+void KillProcess(SOCKET s, uint32_t pid) {
+    // 使用标准 OpenProcess
+    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
+
+    if (hProcess) {
+        // 使用标准 TerminateProcess
+        if (TerminateProcess(hProcess, 0)) {
+            SendResponse(s, CMD_PROCESS_KILL, 1, pid, NULL, 0);
+        } else {
+            SendResponse(s, CMD_PROCESS_KILL, 0, pid, NULL, 0);
+        }
+        CloseHandle(hProcess);
+    } else {
+        SendResponse(s, CMD_PROCESS_KILL, 0, pid, NULL, 0);
+    }
+}
 
 // DLL 导出函数
 extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
@@ -276,10 +296,7 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
         ListProcessModules(s, pkg->arg2); // arg2 contains PID
     } else if (pkg->cmd == CMD_PROCESS_KILL) {
         EnableDebugPrivilege(); // 确保有权限
-        // arg1 might be DLL size if loaded via MemoryModule, so use arg2 for PID
-        bool ok = KillProcess(pkg->arg2);
-        std::string msg = ok ? "进程已结束" : "结束进程失败";
-        SendResponse(s, CMD_PROCESS_KILL, (uint32_t)msg.size(), pkg->arg2, msg.c_str(), (int)msg.size());
+        KillProcess(s, pkg->arg2);
     }
 }
 
