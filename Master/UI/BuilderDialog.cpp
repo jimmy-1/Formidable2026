@@ -92,7 +92,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             SendMessageW(hComboCompress, CB_SETCURSEL, 0, 0);
         }
         
-        // 负载类型 Combobox
+        /*
+        // 负载类型 Combobox - 已移除
         HWND hComboPayload = GetDlgItem(hDlg, IDC_COMBO_PAYLOAD);
         if (hComboPayload) {
             SendMessageW(hComboPayload, CB_ADDSTRING, 0, (LPARAM)L"内嵌");
@@ -100,6 +101,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             SendMessageW(hComboPayload, CB_ADDSTRING, 0, (LPARAM)L"远程加载");
             SendMessageW(hComboPayload, CB_SETCURSEL, 0, 0);
         }
+        */
         
         // 执行模式 Combobox
         HWND hComboExecModel = GetDlgItem(hDlg, IDC_COMBO_EXECMODEL);
@@ -136,6 +138,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         return (INT_PTR)TRUE;
     }
     case WM_COMMAND:
+        /*
         if (LOWORD(wParam) == IDC_COMBO_PAYLOAD) {
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 HWND hCombo = (HWND)lParam;
@@ -146,8 +149,10 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             }
             return (INT_PTR)TRUE;
         }
+        */
         if (LOWORD(wParam) == IDC_CHECK_FILESERVER) {
-            int index = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
+            // int index = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
+            int index = 0; // Default to embedded
             BOOL enableDownload = (index == 1 || index == 2) || IsDlgButtonChecked(hDlg, IDC_CHECK_FILESERVER);
             EnableWindow(GetDlgItem(hDlg, IDC_EDIT_DOWNLOAD_URL), enableDownload);
             return (INT_PTR)TRUE;
@@ -180,7 +185,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             int runTypeIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_RUN_TYPE), CB_GETCURSEL, 0, 0);
             int protocolIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PROTOCOL), CB_GETCURSEL, 0, 0);
             int compressIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_COMPRESS), CB_GETCURSEL, 0, 0);
-            int payloadIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
+            // int payloadIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
+            int payloadIndex = 0; // Default to embedded
             
             bool runAsAdmin = (IsDlgButtonChecked(hDlg, IDC_CHECK_ADMIN) == BST_CHECKED);
             // bool startup = (IsDlgButtonChecked(hDlg, IDC_CHECK_STARTUP) == BST_CHECKED); // 已废弃

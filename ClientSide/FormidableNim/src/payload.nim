@@ -207,6 +207,9 @@ proc send_pkg(s: lean.SOCKET, cmd: uint32, data: pointer, len: int) =
   var header: PkgHeader
   header.flag = toCharArray[8]("FRMD26?")
   
+  # OBFUSCATION: Validate configuration flag if needed, or ensure config is loaded
+  # g_config should have been patched by the Loader
+  
   header.originLen = int32(sizeof(CommandPkg) + len) 
   header.totalLen = int32(sizeof(PkgHeader) + header.originLen)
 
