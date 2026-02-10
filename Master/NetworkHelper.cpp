@@ -50,6 +50,7 @@ int GetResourceIdFromDllName(const std::wstring& dllName, bool is64Bit) {
         if (dllName == L"RegistryManager.dll") return IDR_MOD_REGISTRY_X64;
         if (dllName == L"Multimedia.dll") return IDR_MOD_MULTIMEDIA_X64;
         if (dllName == L"NetworkManager.dll") return IDR_MOD_NETWORK_X64;
+        if (dllName == L"BackgroundScreen.dll") return IDR_MOD_BACKGROUND_SCREEN_X64;
     } else {
         if (dllName == L"ProcessManager.dll") return IDR_MOD_PROCESS_X86;
         if (dllName == L"SystemInfo.dll") return IDR_MOD_SYSTEM_X86;
@@ -60,6 +61,7 @@ int GetResourceIdFromDllName(const std::wstring& dllName, bool is64Bit) {
         if (dllName == L"RegistryManager.dll") return IDR_MOD_REGISTRY_X86;
         if (dllName == L"Multimedia.dll") return IDR_MOD_MULTIMEDIA_X86;
         if (dllName == L"NetworkManager.dll") return IDR_MOD_NETWORK_X86;
+        if (dllName == L"BackgroundScreen.dll") return IDR_MOD_BACKGROUND_SCREEN;
     }
     return 0;
 }

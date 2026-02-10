@@ -62,6 +62,10 @@ private:
     // 处理屏幕捕获
     static void HandleScreenCapture(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     
+    // 处理后台屏幕
+    static void HandleBackgroundScreenCapture(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleBackgroundGeneric(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    
     // 处理剪贴板
     static void HandleClipboard(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     

@@ -61,8 +61,7 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
     case WM_SIZE: {
         RECT rc;
         GetClientRect(hDlg, &rc);
-        MoveWindow(GetDlgItem(hDlg, IDC_LIST_NETWORK), 0, 0, rc.right, rc.bottom - 40, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_BTN_NET_REFRESH), 10, rc.bottom - 30, 80, 25, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_LIST_NETWORK), 0, 0, rc.right, rc.bottom, TRUE);
         return (INT_PTR)TRUE;
     }
     case WM_NOTIFY: {
@@ -110,7 +109,6 @@ INT_PTR CALLBACK NetworkDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         if (!client) break;
 
         switch (LOWORD(wParam)) {
-        case IDC_BTN_NET_REFRESH:
         case IDM_NET_REFRESH: {
             SendModuleToClient(clientId, CMD_LOAD_MODULE, L"NetworkManager.dll", CMD_NETWORK_LIST);
             break;

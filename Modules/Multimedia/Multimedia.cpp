@@ -481,73 +481,68 @@ void ScreenThread(SOCKET s) {
 
         // DXGI 截屏逻辑
         if (g_captureMethod == 1 && g_dxgiCapture) {
-             int dxgiW = 0, dxgiH = 0;
-             // 100ms 超时
-             if (g_dxgiCapture->CaptureFrame(dxgiBuffer, dxgiW, dxgiH, 100)) {
-                 pBits = dxgiBuffer.data();
-                 targetWidth = dxgiW;
-                 targetHeight = dxgiH;
-                 bltResult = TRUE;
-                 dxgiFailCount = 0;
-             } else {
-                 dxgiFailCount++;
-                 // 连续失败 10 次 (约1秒)，或者首次就严重失败（这里无法区分，只能靠计数）
-                 // 如果是超时，通常意味着画面静止。但如果一直超时，主控端会断开。
-                 // 简单策略：如果 DXGI 真的不行，切回 GDI。
-                 // 但如何区分“静止”和“错误”？DXGICapture 内部返回 false 无法区分。
-                 // 假设：如果用户在操作，肯定有变化。如果一直没变化，可能是没人操作。
-                 // 但如果是黑屏，那肯定是错误。
-                 
-                 // 激进策略：只要失败就计数，超过阈值降级。
-                 // 这意味着画面静止久了会自动切回 GDI。GDI 截屏虽然慢但总能截到（即使静止）。
-                 // GDI BitBlt 不会等待变化，它直接拷贝当前屏幕。
-                 // 所以 GDI 模式下 bltResult 总是 TRUE。
-                 
-                 if (dxgiFailCount > 10) { 
-                     // 降级到 GDI
-                     if (g_dxgiCapture) {
-                         delete g_dxgiCapture;
-                         g_dxgiCapture = NULL;
-                     }
-                     g_captureMethod = 0;
-                 }
-             }
-        } 
-        
-        // GDI 截屏逻辑 (如果是 GDI 模式，或者 DXGI 刚刚降级)
-        if (g_captureMethod == 0) {
-            // 检查是否需要重建 DIBSection (尺寸变化或首次创建)
-            if (hBitmap == NULL || cachedWidth != targetWidth || cachedHeight != targetHeight) {
-                if (hOldBitmap) SelectObject(hMemDC, hOldBitmap);
-                if (hBitmap) DeleteObject(hBitmap);
-                
-                BITMAPINFO bi = { 0 };
-                bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-                bi.bmiHeader.biWidth = targetWidth;
-                bi.bmiHeader.biHeight = -targetHeight; // Top-Down
-                bi.bmiHeader.biPlanes = 1;
-                bi.bmiHeader.biBitCount = 24;
-                bi.bmiHeader.biCompression = BI_RGB;
-                
-                hBitmap = CreateDIBSection(hScreenDC, &bi, DIB_RGB_COLORS, &pBits, NULL, 0);
-                if (!hBitmap) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    continue;
-                }
-                
-                hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
-                cachedWidth = targetWidth;
-                cachedHeight = targetHeight;
-            }
+        int dxgiW = 0, dxgiH = 0;
+        // 100ms 超时
+        if (g_dxgiCapture->CaptureFrame(dxgiBuffer, dxgiW, dxgiH, 100)) {
+            pBits = dxgiBuffer.data();
+            targetWidth = dxgiW;
+            targetHeight = dxgiH;
+            bltResult = TRUE;
+            dxgiFailCount = 0;
+        } else {
+            // 检查是否是因为设备丢失导致的失败
+            // 如果 g_dxgiCapture 内部已经 Cleanup 了，说明确实有问题
+            // DXGICapture::CaptureFrame 内部会尝试重新初始化
+            dxgiFailCount++;
             
-            // 执行截屏
-            if (targetWidth == width && targetHeight == height) {
-                bltResult = BitBlt(hMemDC, 0, 0, width, height, hScreenDC, screenX, screenY, SRCCOPY | CAPTUREBLT);
-            } else {
-                SetStretchBltMode(hMemDC, HALFTONE);
-                bltResult = StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, screenX, screenY, width, height, SRCCOPY | CAPTUREBLT);
+            if (dxgiFailCount > 20) { 
+                // 降级到 GDI
+                if (g_dxgiCapture) {
+                    delete g_dxgiCapture;
+                    g_dxgiCapture = NULL;
+                }
+                g_captureMethod = 0;
             }
         }
+    } 
+    
+    // GDI 截屏逻辑 (如果是 GDI 模式，或者 DXGI 刚刚降级)
+    if (g_captureMethod == 0) {
+        // 确保清除 DXGI 计数
+        dxgiFailCount = 0;
+        
+        // 检查是否需要重建 DIBSection (尺寸变化或首次创建)
+        if (hBitmap == NULL || cachedWidth != targetWidth || cachedHeight != targetHeight) {
+            if (hOldBitmap) SelectObject(hMemDC, hOldBitmap);
+            if (hBitmap) DeleteObject(hBitmap);
+            
+            BITMAPINFO bi = { 0 };
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = targetWidth;
+            bi.bmiHeader.biHeight = -targetHeight; // Top-Down 简化差异检测和坐标计算
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 24;
+            bi.bmiHeader.biCompression = BI_RGB;
+            
+            hBitmap = CreateDIBSection(hScreenDC, &bi, DIB_RGB_COLORS, &pBits, NULL, 0);
+            if (!hBitmap) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                continue;
+            }
+            
+            hOldBitmap = (HBITMAP)SelectObject(hMemDC, hBitmap);
+            cachedWidth = targetWidth;
+            cachedHeight = targetHeight;
+        }
+        
+        // 执行截屏
+        if (targetWidth == width && targetHeight == height) {
+            bltResult = BitBlt(hMemDC, 0, 0, width, height, hScreenDC, screenX, screenY, SRCCOPY | CAPTUREBLT);
+        } else {
+            SetStretchBltMode(hMemDC, HALFTONE);
+            bltResult = StretchBlt(hMemDC, 0, 0, targetWidth, targetHeight, hScreenDC, screenX, screenY, width, height, SRCCOPY | CAPTUREBLT);
+        }
+    }
 
         if (!bltResult) {
             // 截屏失败（DXGI 超时且未降级）
@@ -998,7 +993,34 @@ void StopVideo() {
     g_videoRunning = false;
 }
 
+#include "../../Common/Utils.h"
+#include <windows.h>
+#include <ctime>
+
+// 全局桌面句柄，用于服务模式下的输入
+static HDESK g_inputDesk = NULL;
+static DWORD g_lastThreadId = 0;
+static clock_t g_lastCheck = 0;
+
 void ProcessMouseEvent(RemoteMouseEvent* ev) {
+    if (Formidable::IsRunAsService()) {
+        const int CHECK_INTERVAL = 100;
+        clock_t now = clock();
+        if (!g_inputDesk || now - g_lastCheck > CHECK_INTERVAL) {
+            g_lastCheck = now;
+            if (Formidable::SwitchToDesktopIfChanged(g_inputDesk)) {
+                g_lastThreadId = 0;
+            }
+        }
+        if (g_inputDesk) {
+            DWORD currentThreadId = GetCurrentThreadId();
+            if (currentThreadId != g_lastThreadId) {
+                SetThreadDesktop(g_inputDesk);
+                g_lastThreadId = currentThreadId;
+            }
+        }
+    }
+
     INPUT input = { 0 };
     input.type = INPUT_MOUSE;
     
@@ -1006,7 +1028,8 @@ void ProcessMouseEvent(RemoteMouseEvent* ev) {
     input.mi.dx = ev->x;
     input.mi.dy = ev->y;
     input.mi.mouseData = ev->data;
-    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    // 必须包含 MOUSEEVENTF_MOVE，否则 MOUSEEVENTF_ABSOLUTE 坐标不会生效
+    input.mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK | MOUSEEVENTF_MOVE;
 
     switch (ev->msg) {
     case WM_LBUTTONDOWN: input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN; break;
@@ -1015,7 +1038,7 @@ void ProcessMouseEvent(RemoteMouseEvent* ev) {
     case WM_RBUTTONUP:   input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP; break;
     case WM_MBUTTONDOWN: input.mi.dwFlags |= MOUSEEVENTF_MIDDLEDOWN; break;
     case WM_MBUTTONUP:   input.mi.dwFlags |= MOUSEEVENTF_MIDDLEUP; break;
-    case WM_MOUSEMOVE:   input.mi.dwFlags |= MOUSEEVENTF_MOVE; break;
+    case WM_MOUSEMOVE:   /* 已经包含 MOVE 标志 */ break;
     case WM_MOUSEWHEEL:  input.mi.dwFlags |= MOUSEEVENTF_WHEEL; break;
     }
 
@@ -1023,12 +1046,28 @@ void ProcessMouseEvent(RemoteMouseEvent* ev) {
 }
 
 void ProcessKeyEvent(RemoteKeyEvent* ev) {
+    if (Formidable::IsRunAsService()) {
+        // 确保键盘事件也在正确的桌面上
+        if (g_inputDesk) SetThreadDesktop(g_inputDesk);
+    }
+
     INPUT input = { 0 };
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = (WORD)ev->vk;
+    input.ki.wScan = MapVirtualKey((UINT)ev->vk, 0);
     
     if (ev->msg == WM_KEYUP || ev->msg == WM_SYSKEYUP) {
         input.ki.dwFlags |= KEYEVENTF_KEYUP;
+    }
+    
+    // 检查是否是扩展键
+    switch (ev->vk) {
+    case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+    case VK_PRIOR:  case VK_NEXT:   case VK_LEFT: case VK_UP:
+    case VK_RIGHT:  case VK_DOWN:   case VK_DIVIDE: case VK_RMENU:
+    case VK_RCONTROL:
+        input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+        break;
     }
 
     SendInput(1, &input, sizeof(INPUT));
@@ -1064,8 +1103,17 @@ extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* p
     } else if (pkg->cmd == CMD_SCREEN_CAPTURE) {
         if (pkg->arg1 == 1) { // Start
             // arg2: Capture Method (0=GDI, 1=DXGI)
-            g_captureMethod = pkg->arg2;
-            StartScreen(s);
+            int newMethod = pkg->arg2;
+            if (g_screenRunning && g_captureMethod != newMethod) {
+                // 如果正在运行且模式改变，先停止
+                g_captureMethod = newMethod;
+                StopScreen();
+                Sleep(200);
+                StartScreen(s);
+            } else {
+                g_captureMethod = newMethod;
+                StartScreen(s);
+            }
         } else { // Stop
             StopScreen();
         }

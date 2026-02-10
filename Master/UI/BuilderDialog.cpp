@@ -45,6 +45,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
         if (hComboExeType) {
             SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"Client.exe");
+            SendMessageW(hComboExeType, CB_ADDSTRING, 0, (LPARAM)L"FormidableNim.exe");
             SendMessageW(hComboExeType, CB_SETCURSEL, 0, 0);
         }
         
@@ -197,8 +198,17 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 // ... logic for both handled by BuildOne callers
             }
 
-            // 从内存加载模块
-            wchar_t szSavePath[MAX_PATH] = L"Client.exe";
+            // 获取选择的 EXE 类型
+            HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
+            int idxExeType = (int)SendMessageW(hComboExeType, CB_GETCURSEL, 0, 0);
+
+            // 设置默认生成的文件名
+            wchar_t szSavePath[MAX_PATH];
+            if (idxExeType == 1) {
+                wcscpy_s(szSavePath, L"FormidableNim.exe");
+            } else {
+                wcscpy_s(szSavePath, L"Client.exe");
+            }
 
             OPENFILENAMEW ofn = { 0 };
             ofn.lStructSize = sizeof(ofn);
@@ -210,7 +220,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             ofn.lpstrFile = szSavePath;
             ofn.nMaxFile = MAX_PATH;
             ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-            ofn.lpstrTitle = L"保存客户端";
+            ofn.lpstrTitle = L"保存客户端 (这是生成的客户端文件名)";
 
             if (!GetSaveFileNameW(&ofn)) return (INT_PTR)TRUE;
 
@@ -244,9 +254,30 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 candidates.push_back(currentDir + L"\\..\\x64\\" + fileName);
                 
                 // 4. 源码结构默认输出路径 (硬编码兜底)
-                // 假设当前在 Master/Debug 或 Master/Release
+                // 假设当前在 Master/Debug 或 Master/Release，输出目录在 $(SolutionDir)Formidable2026\x86
                 candidates.push_back(currentDir + L"\\..\\..\\Formidable2026\\x86\\" + fileName);
                 candidates.push_back(currentDir + L"\\..\\..\\Formidable2026\\x64\\" + fileName);
+                candidates.push_back(currentDir + L"\\..\\..\\x86\\" + fileName);
+                candidates.push_back(currentDir + L"\\..\\..\\x64\\" + fileName);
+                
+                // 5. 移除硬编码路径，使用更灵活的相对路径查找
+                // 向上查找可能的构建输出目录
+                std::wstring searchDir = currentDir;
+                for (int i = 0; i < 4; ++i) { // 最多向上查找4层
+                    size_t lastSlash = searchDir.find_last_of(L"\\/");
+                    if (lastSlash == std::wstring::npos) break;
+                    searchDir = searchDir.substr(0, lastSlash);
+                    
+                    if (targetX64) {
+                        candidates.push_back(searchDir + L"\\Formidable2026\\x64\\" + fileName);
+                        candidates.push_back(searchDir + L"\\x64\\" + fileName);
+                        candidates.push_back(searchDir + L"\\bin\\x64\\" + fileName); // 常见的 bin 目录结构
+                    } else {
+                        candidates.push_back(searchDir + L"\\Formidable2026\\x86\\" + fileName);
+                        candidates.push_back(searchDir + L"\\x86\\" + fileName);
+                        candidates.push_back(searchDir + L"\\bin\\x86\\" + fileName);
+                    }
+                }
 
                 for (const auto& path : candidates) {
                     if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
@@ -258,30 +289,69 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
             auto BuildOne = [&](bool x64, const std::wstring& dest) -> bool {
                 std::vector<char> buffer;
-                int resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
                 
-                if (resId == 0 || !GetResourceData(resId, buffer)) {
-                    std::wstring fileName;
-                    fileName = L"Client.exe";
+                // 获取选择的 EXE 类型
+                HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
+                int idxExeTypeSelected = (int)SendMessageW(hComboExeType, CB_GETCURSEL, 0, 0);
+                bool isNim = (idxExeTypeSelected == 1);
 
-                    std::wstring templatePath = FindTemplateFile(fileName, x64);
-                    
-                    if (!templatePath.empty()) {
-                        HANDLE hFile = CreateFileW(templatePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                        if (hFile != INVALID_HANDLE_VALUE) {
-                            DWORD size = GetFileSize(hFile, NULL);
-                            buffer.resize(size);
-                            DWORD read;
-                            ReadFile(hFile, buffer.data(), size, &read, NULL);
-                            CloseHandle(hFile);
+                // 尝试从资源加载 (C++和Nim版都支持)
+                int resId = 0;
+                if (isNim) {
+                    resId = x64 ? IDR_NIM_CLIENT_EXE_X64 : IDR_NIM_CLIENT_EXE_X86;
+                } else {
+                    resId = x64 ? IDR_CLIENT_EXE_X64 : IDR_CLIENT_EXE_X86;
+                }
+
+                if (resId != 0) {
+                    GetResourceData(resId, buffer);
+                }
+
+                // 如果资源加载失败或为空，则尝试从外部文件加载
+                if (buffer.empty()) {
+                    if (isNim) {
+                        // Nim 版被控端外部文件加载逻辑
+                        std::wstring fileName = L"FormidableNim.exe";
+                        std::wstring templatePath = FindTemplateFile(fileName, x64);
+                        
+                        // 如果没找到，尝试带 _Debug 后缀的 (Nim 编译常带)
+                        if (templatePath.empty()) {
+                            templatePath = FindTemplateFile(L"FormidableNim_Debug.exe", x64);
                         }
-                    } 
-                    
-                    if (buffer.empty()) {
-                        std::wstring msg = L"无法找到模板文件: " + fileName + L"\n请确认已编译 Client 项目。\n尝试过的路径包括当前目录及 ../x86, ../x64 等。";
-                        MessageBoxW(hDlg, msg.c_str(), L"错误", MB_ICONERROR);
-                        return false;
+                        
+                        if (!templatePath.empty()) {
+                            HANDLE hFile = CreateFileW(templatePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                            if (hFile != INVALID_HANDLE_VALUE) {
+                                DWORD size = GetFileSize(hFile, NULL);
+                                buffer.resize(size);
+                                DWORD read;
+                                ReadFile(hFile, buffer.data(), size, &read, NULL);
+                                CloseHandle(hFile);
+                            }
+                        }
+                    } else {
+                        // C++ 版被控端外部文件加载逻辑
+                        std::wstring fileName = L"Client.exe";
+                        std::wstring templatePath = FindTemplateFile(fileName, x64);
+                        
+                        if (!templatePath.empty()) {
+                            HANDLE hFile = CreateFileW(templatePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                            if (hFile != INVALID_HANDLE_VALUE) {
+                                DWORD size = GetFileSize(hFile, NULL);
+                                buffer.resize(size);
+                                DWORD read;
+                                ReadFile(hFile, buffer.data(), size, &read, NULL);
+                                CloseHandle(hFile);
+                            }
+                        } 
                     }
+                }
+
+                if (buffer.empty()) {
+                    std::wstring fileName = isNim ? L"FormidableNim.exe" : L"Client.exe";
+                    std::wstring msg = L"无法找到模板文件: " + fileName + (isNim ? L" (或 FormidableNim_Debug.exe)" : L"") + L"\n请确认已编译被控端项目。\n架构: " + (x64 ? L"x64" : L"x86");
+                    MessageBoxW(hDlg, msg.c_str(), L"错误", MB_ICONERROR);
+                    return false;
                 }
 
                 bool found = false;

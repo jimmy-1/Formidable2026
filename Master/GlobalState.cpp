@@ -81,6 +81,14 @@ static void EnsureUiBrush() {
     g_uiAccentColor = GetSysColor(COLOR_HIGHLIGHT);
 }
 
+static void ApplyRoundRectRegion(HWND hCtrl, int radius) {
+    RECT rc;
+    GetClientRect(hCtrl, &rc);
+    if (rc.right <= 0 || rc.bottom <= 0) return;
+    HRGN rgn = CreateRoundRectRgn(0, 0, rc.right + 1, rc.bottom + 1, radius, radius);
+    SetWindowRgn(hCtrl, rgn, TRUE);
+}
+
 typedef HRESULT (WINAPI* DwmSetWindowAttributePtr)(HWND, DWORD, LPCVOID, DWORD);
 static DwmSetWindowAttributePtr GetDwmSetWindowAttribute() {
     static DwmSetWindowAttributePtr pDwmSetWindowAttribute = nullptr;
@@ -158,12 +166,18 @@ static void ApplyThemeToControl(HWND hCtrl) {
     if (_wcsicmp(cls, WC_LISTVIEWW) == 0) {
         removeBorder();
         DWORD ex = ListView_GetExtendedListViewStyle(hCtrl);
-        ex |= LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP;
-        ex &= ~LVS_EX_GRIDLINES;
+        ex |= LVS_EX_DOUBLEBUFFER | LVS_EX_FULLROWSELECT | LVS_EX_LABELTIP | LVS_EX_GRIDLINES;
         ListView_SetExtendedListViewStyle(hCtrl, ex);
         ListView_SetBkColor(hCtrl, g_uiListBackgroundColor);
         ListView_SetTextBkColor(hCtrl, g_uiListBackgroundColor);
         ListView_SetTextColor(hCtrl, g_uiTextColor);
+        HWND hHeader = (HWND)SendMessageW(hCtrl, LVM_GETHEADER, 0, 0);
+        if (hHeader) {
+            LONG_PTR hdrStyle = GetWindowLongPtrW(hHeader, GWL_STYLE);
+            hdrStyle |= HDS_HOTTRACK | HDS_FLAT;
+            SetWindowLongPtrW(hHeader, GWL_STYLE, hdrStyle);
+            InvalidateRect(hHeader, NULL, TRUE);
+        }
         return;
     }
     if (_wcsicmp(cls, WC_TREEVIEWW) == 0) {
@@ -187,16 +201,27 @@ static void ApplyThemeToControl(HWND hCtrl) {
         if ((style & BS_TYPEMASK) == BS_PUSHBUTTON || (style & BS_TYPEMASK) == BS_DEFPUSHBUTTON) {
             RECT margins = { 12, 6, 12, 6 };
             SendMessageW(hCtrl, BCM_SETTEXTMARGIN, 0, (LPARAM)&margins);
+            ApplyRoundRectRegion(hCtrl, 8);
         }
         return;
     }
     if (_wcsicmp(cls, WC_TABCONTROLW) == 0) {
+        LONG_PTR style = GetWindowLongPtrW(hCtrl, GWL_STYLE);
+        LONG_PTR newStyle = style | TCS_HOTTRACK | TCS_FLATBUTTONS;
+        if (newStyle != style) {
+            SetWindowLongPtrW(hCtrl, GWL_STYLE, newStyle);
+            SetWindowPos(hCtrl, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
+        TabCtrl_SetPadding(hCtrl, 12, 6);
         return;
     }
     if (_wcsicmp(cls, STATUSCLASSNAMEW) == 0) {
         return;
     }
     if (_wcsicmp(cls, TOOLBARCLASSNAMEW) == 0) {
+        DWORD exStyle = (DWORD)SendMessageW(hCtrl, TB_GETEXTENDEDSTYLE, 0, 0);
+        exStyle |= TBSTYLE_EX_DOUBLEBUFFER | TBSTYLE_EX_MIXEDBUTTONS;
+        SendMessageW(hCtrl, TB_SETEXTENDEDSTYLE, 0, exStyle);
         return;
     }
 }

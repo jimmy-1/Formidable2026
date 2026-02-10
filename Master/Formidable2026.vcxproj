@@ -195,6 +195,7 @@
     <ClCompile Include="UI\DesktopDialog.cpp" />
     <ClCompile Include="UI\RegistryDialog.cpp" />
     <ClCompile Include="UI\HistoryDialog.cpp" />
+    <ClCompile Include="UI\BackgroundDialog.cpp" />
     <ClCompile Include="..\Common\Utils.cpp" />
     <ClCompile Include="..\Common\NetworkServer.cpp" />
     <ClCompile Include="Core\ClientManager.cpp" />
@@ -239,6 +240,7 @@
     <ClInclude Include="UI\VideoDialog.h" />
     <ClInclude Include="UI\KeylogDialog.h" />
     <ClInclude Include="UI\HistoryDialog.h" />
+    <ClInclude Include="UI\BackgroundDialog.h" />
     <ClInclude Include="UI\TerminalDialog.h" />
     <ClInclude Include="UI\NetworkDialog.h" />
     <ClInclude Include="UI\FileDialog.h" />

@@ -62,6 +62,30 @@ static const uint64_t kDownloadChunkSize = 64 * 1024;
 #define WM_UPDATE_PROGRESS (WM_USER + 201)
 #define IDC_PROGRESS_BAR 1099
 
+static bool IsTransferActive(HWND hDlg) {
+    std::lock_guard<std::mutex> lock(s_transferMutex);
+    auto it = s_transferTotalBytes.find(hDlg);
+    if (it == s_transferTotalBytes.end()) return false;
+    return it->second > 0;
+}
+
+static void SetLoadingState(HWND hDlg, bool loading, const wchar_t* statusText) {
+    HWND hProg = GetDlgItem(hDlg, IDC_PROGRESS_BAR);
+    if (hProg) {
+        if (loading && !IsTransferActive(hDlg)) {
+            SendMessageW(hProg, PBM_SETMARQUEE, TRUE, 30);
+        } else {
+            SendMessageW(hProg, PBM_SETMARQUEE, FALSE, 0);
+        }
+    }
+    if (statusText) {
+        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+        if (hStatusBar) {
+            SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)statusText);
+        }
+    }
+}
+
 // 辅助：发送控制命令
 static void SendRemoteCommand(uint32_t clientId, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data = nullptr, size_t dataLen = 0) {
     std::shared_ptr<ConnectedClient> client;
@@ -444,10 +468,18 @@ static void RefreshRemoteList(HWND hDlg) {
     
     if (path.empty()) {
         UpdateDriveViewVisibility(hDlg, true);
+        SetPropW(hDlg, L"FILE_DRIVE_PENDING", (HANDLE)1);
+        RemovePropW(hDlg, L"FILE_DRIVE_RETRY");
+        SetTimer(hDlg, 2, 2000, NULL);
+        SetLoadingState(hDlg, true, L"正在加载驱动器...");
         SendRemoteCommand(clientId, CMD_DRIVE_LIST, 0, 0);
     } else {
         UpdateDriveViewVisibility(hDlg, false);
+        RemovePropW(hDlg, L"FILE_DRIVE_PENDING");
+        RemovePropW(hDlg, L"FILE_DRIVE_RETRY");
+        KillTimer(hDlg, 2);
         if (path.back() != '\\') path += "\\";
+        SetLoadingState(hDlg, true, L"正在加载目录...");
         SendRemoteCommand(clientId, CMD_FILE_LIST, (uint32_t)path.size(), 0, path.c_str(), path.size());
     }
 }
@@ -515,8 +547,11 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         HWND hSearch = GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH);
         if (hSearch) SendMessageW(hSearch, EM_SETCUEBANNER, TRUE, (LPARAM)L"搜索文件");
         
+        HWND hNavBar = GetDlgItem(hDlg, IDC_STATIC_NAV_BAR);
+        if (hNavBar) SetWindowTextW(hNavBar, L"路径");
+
         // 创建进度条
-        HWND hProg = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH, 
+        HWND hProg = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH | PBS_MARQUEE, 
             0, 0, 100, 15, hDlg, (HMENU)IDC_PROGRESS_BAR, g_hInstance, NULL);
         SendMessage(hProg, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
 
@@ -531,14 +566,45 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         if (wParam == 1) {
             KillTimer(hDlg, 1);
             RefreshRemoteList(hDlg);
+        } else if (wParam == 2) {
+            if (GetPropW(hDlg, L"FILE_DRIVE_PENDING")) {
+                if (GetPropW(hDlg, L"FILE_DRIVE_RETRY") == NULL) {
+                    SetPropW(hDlg, L"FILE_DRIVE_RETRY", (HANDLE)1);
+                    uint32_t clientId = s_dlgToClientId[hDlg];
+                    SetLoadingState(hDlg, true, L"驱动器加载超时，正在重试...");
+                    SendRemoteCommand(clientId, CMD_DRIVE_LIST, 0, 0);
+                } else {
+                    RemovePropW(hDlg, L"FILE_DRIVE_PENDING");
+                    RemovePropW(hDlg, L"FILE_DRIVE_RETRY");
+                    KillTimer(hDlg, 2);
+                    SetLoadingState(hDlg, false, L"驱动器加载失败，请点击刷新重试");
+                    UpdateDriveViewVisibility(hDlg, true);
+                }
+            } else {
+                KillTimer(hDlg, 2);
+            }
         }
         break;
     case WM_FILE_UPDATE_DRIVES: {
+        RemovePropW(hDlg, L"FILE_DRIVE_PENDING");
+        RemovePropW(hDlg, L"FILE_DRIVE_RETRY");
+        KillTimer(hDlg, 2);
         std::string* payload = (std::string*)lParam;
         std::vector<std::wstring> paths;
         std::vector<std::wstring> names;
         std::vector<std::wstring> types;
         if (payload) {
+            if (payload->find('|') == std::string::npos) {
+                HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+                std::wstring wMsg = Formidable::UTF8ToWide(*payload);
+                if (hStatusBar) {
+                    SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)wMsg.c_str());
+                }
+                delete payload;
+                UpdateDriveViewVisibility(hDlg, true);
+                SetLoadingState(hDlg, false, nullptr);
+                return (INT_PTR)TRUE;
+            }
             std::stringstream ss(*payload);
             std::string line;
             while (std::getline(ss, line)) {
@@ -590,12 +656,146 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             swprintf_s(szStatus, L" 设备和驱动器：%d", (int)names.size());
             SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
         }
+        SetLoadingState(hDlg, false, nullptr);
+        return (INT_PTR)TRUE;
+    }
+    case WM_FILE_UPDATE_LIST: {
+        std::string* payload = (std::string*)lParam;
+        std::string data = payload ? *payload : std::string();
+        delete payload;
+
+        HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
+        bool appendMode = GetPropW(hDlg, L"FILE_SEARCH_APPEND") != NULL;
+        bool clearFirst = GetPropW(hDlg, L"FILE_SEARCH_CLEAR") != NULL;
+        if (!appendMode || clearFirst) {
+            ListView_DeleteAllItems(hList);
+            if (clearFirst) RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+        }
+        SendMessage(hList, WM_SETREDRAW, FALSE, 0);
+
+        if (data == "PERMISSION_DENIED") {
+            SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+            HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+            if (hStatusBar) {
+                SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)L"权限不足，无法访问该目录");
+            }
+            MessageBoxW(hDlg, L"权限不足，无法访问该目录", L"错误", MB_ICONERROR);
+            SetLoadingState(hDlg, false, nullptr);
+            PostMessageW(hDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
+            return (INT_PTR)TRUE;
+        }
+
+        std::stringstream ss(data);
+        std::string line;
+        int index = ListView_GetItemCount(hList);
+        int dirCount = 0;
+        int fileCount = 0;
+        unsigned long long totalSize = 0;
+
+        while (std::getline(ss, line)) {
+            if (line.empty()) continue;
+            size_t p1 = line.find('|');
+            size_t p2 = line.find('|', p1 + 1);
+            size_t p3 = line.find('|', p2 + 1);
+
+            if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
+                std::string typeStr = line.substr(0, p1);
+                std::string nameStr = line.substr(p1 + 1, p2 - p1 - 1);
+                std::string sizeStr = line.substr(p2 + 1, p3 - p2 - 1);
+                std::string timeStr = line.substr(p3 + 1);
+
+                bool isDir = (typeStr == "[DIR]");
+                if (isDir) dirCount++;
+                else fileCount++;
+
+                std::wstring wName = Formidable::UTF8ToWide(nameStr);
+                SHFILEINFOW sfi = { 0 };
+                DWORD flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+                DWORD attr = isDir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
+                SHGetFileInfoW(wName.c_str(), attr, &sfi, sizeof(sfi), flags);
+
+                LVITEMW lvi = { 0 };
+                lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
+                lvi.iItem = index;
+                lvi.pszText = (LPWSTR)wName.c_str();
+                lvi.lParam = index;
+                lvi.iImage = sfi.iIcon;
+
+                int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
+
+                LVITEMW lviSet = { 0 };
+                std::wstring wSize;
+                if (isDir) {
+                    wSize = L"<DIR>";
+                } else {
+                    unsigned long long size = std::stoull(sizeStr);
+                    totalSize += size;
+                    if (size > 1024 * 1024 * 1024)
+                        wSize = std::to_wstring(size / (1024 * 1024 * 1024)) + L" GB";
+                    else if (size > 1024 * 1024)
+                        wSize = std::to_wstring(size / (1024 * 1024)) + L" MB";
+                    else if (size > 1024)
+                        wSize = std::to_wstring(size / 1024) + L" KB";
+                    else
+                        wSize = std::to_wstring(size) + L" B";
+                }
+                lviSet.iSubItem = 1; lviSet.pszText = (LPWSTR)wSize.c_str();
+                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
+
+                std::wstring wType = isDir ? L"文件夹" : L"文件";
+                lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)wType.c_str();
+                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
+
+                std::wstring wTime = Formidable::UTF8ToWide(timeStr);
+                lviSet.iSubItem = 3; lviSet.pszText = (LPWSTR)wTime.c_str();
+                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
+
+                index++;
+            }
+        }
+        SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+
+        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
+        if (hStatusBar) {
+            wchar_t szTotalSize[64] = {0};
+            if (totalSize > 1024 * 1024 * 1024)
+                swprintf_s(szTotalSize, L"%.2f GB", totalSize / (double)(1024 * 1024 * 1024));
+            else if (totalSize > 1024 * 1024)
+                swprintf_s(szTotalSize, L"%.2f MB", totalSize / (double)(1024 * 1024));
+            else if (totalSize > 1024)
+                swprintf_s(szTotalSize, L"%.2f KB", totalSize / (double)1024);
+            else
+                swprintf_s(szTotalSize, L"%llu B", totalSize);
+
+            wchar_t szStatus[256] = {0};
+            swprintf_s(szStatus, L" %d 个项目  |  %d 个文件夹  |  %d 个文件  |  总大小: %s", 
+                      dirCount + fileCount, dirCount, fileCount, szTotalSize);
+            SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
+        }
+        if (appendMode) {
+            HANDLE hPending = GetPropW(hDlg, L"FILE_SEARCH_PENDING");
+            UINT_PTR pending = (UINT_PTR)hPending;
+            if (pending > 0) pending--;
+            if (pending <= 1) {
+                RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
+                RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+                RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
+            } else {
+                SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)pending);
+            }
+        }
+        SetLoadingState(hDlg, false, nullptr);
+        PostMessageW(hDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
         return (INT_PTR)TRUE;
     }
     case WM_FILE_SHOW_LIST:
         UpdateDriveViewVisibility(hDlg, false);
         return (INT_PTR)TRUE;
+    case WM_FILE_LOADING_STATE:
+        SetLoadingState(hDlg, wParam != 0, nullptr);
+        return (INT_PTR)TRUE;
     case WM_UPDATE_PROGRESS:
+        SetLoadingState(hDlg, false, nullptr);
         SendDlgItemMessage(hDlg, IDC_PROGRESS_BAR, PBM_SETPOS, wParam, 0);
         {
             HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
@@ -674,24 +874,34 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
         int spacing = 8;
         int margin = 8;
 
-        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_NAV_BAR), 0, 0, width, navHeight, TRUE);
+        int labelWidth = 40;
+        int labelHeight = 22;
+        int labelY = 6;
+        MoveWindow(GetDlgItem(hDlg, IDC_STATIC_NAV_BAR), margin, labelY, labelWidth, labelHeight, TRUE);
 
         int searchWidth = 180;
-        int comboHeight = 20;
+        int comboHeight = 22; // 稍微增加高度以匹配现代风格
         int comboY = 6;
-        int comboX = margin + 2;
+        int comboX = margin + labelWidth + spacing;
         int comboWidth = 0;
         int available = width - comboX - margin;
-        int minSearchWidth = 120;
-        int minComboWidth = 120;
-        if (available < minSearchWidth + minComboWidth + spacing) {
-            comboWidth = max(80, available - minSearchWidth - spacing);
-            searchWidth = max(80, available - comboWidth - spacing);
+        
+        // 改进布局逻辑：路径框占据剩余的大部分空间，搜索框固定宽度或按比例
+        int minSearchWidth = 100;
+        int minComboWidth = 150;
+        
+        if (available < minComboWidth + minSearchWidth + spacing) {
+            // 空间极度受限时，按比例分配
+            comboWidth = (available - spacing) * 2 / 3;
+            searchWidth = available - spacing - comboWidth;
         } else {
+            // 空间充足，搜索框固定 180，路径框占据剩余
+            searchWidth = 180;
             comboWidth = available - searchWidth - spacing;
         }
+
         MoveWindow(GetDlgItem(hDlg, IDC_COMBO_NAV_PATH), comboX, comboY, comboWidth, comboHeight, TRUE);
-        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH), comboX + comboWidth + spacing, 6, searchWidth, comboHeight, TRUE);
+        MoveWindow(GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH), comboX + comboWidth + spacing, comboY, searchWidth, comboHeight, TRUE);
 
         int toolbarY = navHeight + spacing;
         int toolbarBtnWidth = 62;
@@ -858,13 +1068,14 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 item.cchTextMax = MAX_PATH;
                 if (TreeView_GetItem(nm->hwndFrom, &item)) {
                     std::wstring path = ExtractDrivePath(text);
-                    if (path.empty() && wcscmp(text, L"此电脑") == 0) {
+                    if (wcscmp(text, L"此电脑") == 0) {
                         TreeView_Expand(nm->hwndFrom, info->itemNew.hItem, TVE_EXPAND);
                         SetNavPathText(hDlg, L"");
+                        RefreshRemoteList(hDlg); // 明确刷新，触发驱动器列表请求
                     } else if (!path.empty()) {
                         SetNavPathText(hDlg, path);
+                        RefreshRemoteList(hDlg);
                     }
-                    RefreshRemoteList(hDlg);
                 }
             }
         }
@@ -892,38 +1103,45 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             HWND hCombo = GetDlgItem(hDlg, IDC_COMBO_NAV_PATH);
             HWND hSearch = GetDlgItem(hDlg, IDC_EDIT_NAV_SEARCH);
             HWND hFocus = GetFocus();
+            
+            // 检查焦点是否在搜索框
+            if (hSearch && (hFocus == hSearch || IsChild(hSearch, hFocus))) {
+                wchar_t szSearch[MAX_PATH] = { 0 };
+                GetDlgItemTextW(hDlg, IDC_EDIT_NAV_SEARCH, szSearch, MAX_PATH);
+                if (wcslen(szSearch) > 0) {
+                    // 执行搜索逻辑
+                    std::vector<std::wstring> targets;
+                    std::wstring dir = GetNavPathText(hDlg);
+                    if (dir.empty()) {
+                        if (s_dlgDrivePaths.count(hDlg)) targets = s_dlgDrivePaths[hDlg];
+                    } else {
+                        targets.push_back(dir);
+                    }
+                    if (targets.empty()) {
+                        targets.push_back(L"C:\\");
+                    }
+                    
+                    RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
+                    RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
+                    RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
+                    if (targets.size() > 1) {
+                        SetPropW(hDlg, L"FILE_SEARCH_APPEND", (HANDLE)1);
+                        SetPropW(hDlg, L"FILE_SEARCH_CLEAR", (HANDLE)1);
+                        SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)(ULONG_PTR)targets.size());
+                    }
+                    
+                    UpdateDriveViewVisibility(hDlg, false);
+                    for (const auto& target : targets) {
+                        std::string payload = WideToUTF8(target) + "|" + WideToUTF8(szSearch);
+                        SendRemoteCommand(clientId, CMD_FILE_SEARCH, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+                    }
+                    return (INT_PTR)TRUE;
+                }
+            }
+
             if (hCombo && hFocus && (hFocus == hCombo || IsChild(hCombo, hFocus))) {
                 RefreshRemoteList(hDlg);
-                break;
-            }
-            wchar_t szSearch[MAX_PATH] = { 0 };
-            GetDlgItemTextW(hDlg, IDC_EDIT_NAV_SEARCH, szSearch, MAX_PATH);
-            if (wcslen(szSearch) == 0) {
-                RefreshRemoteList(hDlg);
-                break;
-            }
-            std::vector<std::wstring> targets;
-            std::wstring dir = GetNavPathText(hDlg);
-            if (dir.empty()) {
-                if (s_dlgDrivePaths.count(hDlg)) targets = s_dlgDrivePaths[hDlg];
-            } else {
-                targets.push_back(dir);
-            }
-            if (targets.empty()) {
-                targets.push_back(L"C:\\");
-            }
-            RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
-            RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
-            RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
-            if (targets.size() > 1) {
-                SetPropW(hDlg, L"FILE_SEARCH_APPEND", (HANDLE)1);
-                SetPropW(hDlg, L"FILE_SEARCH_CLEAR", (HANDLE)1);
-                SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)(ULONG_PTR)targets.size());
-            }
-            UpdateDriveViewVisibility(hDlg, false);
-            for (const auto& target : targets) {
-                std::string payload = WideToUTF8(target) + "|" + WideToUTF8(szSearch);
-                SendRemoteCommand(clientId, CMD_FILE_SEARCH, (uint32_t)payload.size(), 1, payload.c_str(), payload.size());
+                return (INT_PTR)TRUE;
             }
             break;
         }

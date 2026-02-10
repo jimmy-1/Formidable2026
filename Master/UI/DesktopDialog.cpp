@@ -34,6 +34,7 @@ struct DesktopState {
     bool isControlEnabled = false;
     bool isFullscreen = false;
     bool isStretched = true;
+    int captureMethod = 0; // 0=GDI, 1=DXGI
     
     // 运行时状态
     int retryCount = 0;
@@ -196,9 +197,9 @@ LRESULT CALLBACK DesktopScreenProc(HWND hWnd, UINT message, WPARAM wParam, LPARA
             // 区域划分逻辑：
             // 全局屏幕显示区域：用于操作远程屏幕，映射所有键盘鼠标
             
-            // 如果未启用控制，直接拦截消息但不发送
+            // 如果未启用控制，右键点击允许弹出菜单
             if (!state.isControlEnabled) {
-                return 0;
+                return DefSubclassProc(hWnd, message, wParam, lParam);
             }
 
             // 确保窗口获得焦点，以便接收键盘事件
@@ -287,6 +288,8 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         state.useGrayscale = isGrayscale;
         state.useDiff = g_Settings.useDiffTransmission; // Use global setting
         state.compress = g_Settings.imageCompressMethod; // Use global setting
+        state.quality = g_Settings.imageQuality; // Use global setting
+        state.captureMethod = g_Settings.screenCaptureMethod; // Use global setting
         state.retryCount = 0;
         state.hasFrame = false;
         state.isRecording = false;
@@ -328,7 +331,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             Formidable::CommandPkg pkg = { 0 };
             pkg.cmd = Formidable::CMD_SCREEN_CAPTURE;
             pkg.arg1 = 1;
-            pkg.arg2 = 0;
+            pkg.arg2 = state.captureMethod;
             
             size_t bodySize = sizeof(Formidable::CommandPkg);
             std::vector<char> buffer(sizeof(Formidable::PkgHeader) + bodySize);
@@ -590,6 +593,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         HMENU hFpsMenu = CreatePopupMenu();
         HMENU hResMenu = CreatePopupMenu();
         HMENU hCompMenu = CreatePopupMenu();
+        HMENU hMethodMenu = CreatePopupMenu();
         
         // FPS子菜单
         AppendMenuW(hFpsMenu, MF_STRING, IDM_DESKTOP_FPS_5, L"5 FPS");
@@ -607,6 +611,10 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         AppendMenuW(hCompMenu, (state.compress == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_RAW, L"未压缩 (RAW)");
         AppendMenuW(hCompMenu, (state.compress == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_COMPRESS_JPEG, L"高效压缩 (JPEG)");
         // 移除灰度模式和差异传输选项 (已改为设置或启动参数)
+
+        // 采集方式子菜单
+        AppendMenuW(hMethodMenu, (state.captureMethod == 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CAPTURE_GDI, L"GDI 兼容模式");
+        AppendMenuW(hMethodMenu, (state.captureMethod == 1 ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CAPTURE_DXGI, L"DXGI 高速模式");
         
         // 主菜单
         AppendMenuW(hMenu, (state.isControlEnabled ? MF_CHECKED : 0) | MF_STRING, IDM_DESKTOP_CONTROL, L"控制屏幕(&C)");
@@ -619,6 +627,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hFpsMenu, L"帧率设置(&P)");
         AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hResMenu, L"分辨率(&E)");
         AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hCompMenu, L"压缩方案(&Z)");
+        AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMethodMenu, L"采集方式(&M)");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_LOCK_INPUT, L"锁定输入(&L)");
         AppendMenuW(hMenu, MF_STRING, IDM_DESKTOP_SWITCH_MONITOR, L"切换显示器(&M)");
@@ -665,7 +674,7 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             state.isControlEnabled = !state.isControlEnabled;
             // 同步到 ConnectedClient，以便其他地方（如 main_gui.cpp）也能获取到控制状态
             client->isMonitoring = state.isControlEnabled;
-            AddLog(L"桌面", state.isControlEnabled ? L"已启用鼠标控制" : L"已禁用鼠标控制");
+            AddLog(L"桌面", state.isControlEnabled ? L"已启用键鼠控制" : L"已禁用键鼠控制");
             break;
             
         case IDM_DESKTOP_FULLSCREEN: {
@@ -726,6 +735,18 @@ INT_PTR CALLBACK DesktopDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
             state.compress = 1;
             SendCommand(Formidable::CMD_SCREEN_COMPRESS, 1, (state.useDiff ? 2 : 0) | (state.useGrayscale ? 1 : 0));
             MessageBoxW(hDlg, L"已切换至 JPEG (压缩) 传输", L"提示", MB_OK);
+            break;
+
+        case IDM_DESKTOP_CAPTURE_GDI:
+            state.captureMethod = 0;
+            SendCommand(Formidable::CMD_SCREEN_CAPTURE, 1, 0); // 1=Start, 0=GDI
+            MessageBoxW(hDlg, L"已切换至 GDI 兼容采集模式", L"提示", MB_OK);
+            break;
+
+        case IDM_DESKTOP_CAPTURE_DXGI:
+            state.captureMethod = 1;
+            SendCommand(Formidable::CMD_SCREEN_CAPTURE, 1, 1); // 1=Start, 1=DXGI
+            MessageBoxW(hDlg, L"已切换至 DXGI 高速采集模式", L"提示", MB_OK);
             break;
             
         case IDM_DESKTOP_COMPRESS_GRAYSCALE:

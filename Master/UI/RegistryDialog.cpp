@@ -26,13 +26,9 @@ namespace UI {
 
 static std::map<HWND, uint32_t> s_dlgToClientId;
 
-static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, uint32_t action) {
-    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
-    
-    // 构建完整路径
-    std::string path = "";
+static std::string GetCurrentRegistryPath(HWND hTree, HTREEITEM hItem, uint32_t& outRootIdx) {
     std::vector<std::string> pathParts;
-    uint32_t rootIdx = 0;
+    outRootIdx = 0;
     
     HTREEITEM hCurrent = hItem;
     while (hCurrent) {
@@ -44,35 +40,42 @@ static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, u
         tvi.hItem = hCurrent;
         if (TreeView_GetItem(hTree, &tvi)) {
             HTREEITEM hParent = TreeView_GetParent(hTree, hCurrent);
-            bool isRoot = (hParent == NULL);
-
-            if (isRoot && tvi.lParam >= 0 && tvi.lParam < 5) {
-                // 根键
-                rootIdx = (uint32_t)tvi.lParam;
-                const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
-                pathParts.push_back(rootKeys[tvi.lParam]);
+            if (hParent == NULL) {
+                outRootIdx = (uint32_t)tvi.lParam;
             } else {
                 pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
-                // 子节点也存储了 rootIdx
-                if (tvi.lParam >= 0 && tvi.lParam < 5) {
-                    rootIdx = (uint32_t)tvi.lParam;
-                }
             }
         }
         hCurrent = TreeView_GetParent(hTree, hCurrent);
     }
     
-    // 反转路径
     std::reverse(pathParts.begin(), pathParts.end());
-    
-    // 组合路径，跳过根键
-    for (size_t i = 1; i < pathParts.size(); i++) {
-        if (i > 1) path += "\\";
+    std::string path = "";
+    for (size_t i = 0; i < pathParts.size(); i++) {
+        if (i > 0) path += "\\";
         path += pathParts[i];
     }
+    return path;
+}
+
+static void SendRegistryRequest(HWND hDlg, uint32_t clientId, HTREEITEM hItem, uint32_t action) {
+    HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
     
-    // 如果路径不为空，打印调试或检查
-    // OutputDebugStringA(("Registry Path: " + path + "\n").c_str());
+    // 限制请求频率，防止快速连续点击导致的异常
+    static DWORD lastRequestTime = 0;
+    DWORD now = GetTickCount();
+    if (now - lastRequestTime < 200) { // 200ms 间隔
+        return;
+    }
+    lastRequestTime = now;
+
+    // 构建完整路径
+    uint32_t rootIdx = 0;
+    std::string path = GetCurrentRegistryPath(hTree, hItem, rootIdx);
+    
+    // 如果路径中包含重复的部分（循环路径防御），可以通过 pathParts 检查，
+    // 这里简单对 path 进行长度限制或简单的重复模式检查
+    if (path.length() > 1024) return; 
 
     // 发送请求到服务端
     Formidable::CommandPkg pkg = { 0 };
@@ -263,28 +266,17 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                     uint32_t clientId = s_dlgToClientId[hDlg];
                     
                     // 更新路径输入框
-                    std::vector<std::wstring> pathParts;
-                    HTREEITEM hCurrent = pnmtv->itemNew.hItem;
+                    uint32_t rootIdx = 0;
                     HWND hTree = GetDlgItem(hDlg, IDC_TREE_REGISTRY);
-                    while (hCurrent) {
-                        wchar_t text[256];
-                        TVITEMW tvi = { 0 };
-                        tvi.mask = TVIF_TEXT;
-                        tvi.pszText = text;
-                        tvi.cchTextMax = 256;
-                        tvi.hItem = hCurrent;
-                        if (TreeView_GetItem(hTree, &tvi)) {
-                            pathParts.push_back(text);
-                        }
-                        hCurrent = TreeView_GetParent(hTree, hCurrent);
+                    std::string path = GetCurrentRegistryPath(hTree, pnmtv->itemNew.hItem, rootIdx);
+                    
+                    const char* rootKeys[] = { "HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG" };
+                    std::string fullPathStr = rootKeys[rootIdx % 5];
+                    if (!path.empty()) {
+                        fullPathStr += "\\";
+                        fullPathStr += path;
                     }
-                    std::reverse(pathParts.begin(), pathParts.end());
-                    std::wstring fullPath = L"";
-                    for (size_t i = 0; i < pathParts.size(); i++) {
-                        if (i > 0) fullPath += L"\\";
-                        fullPath += pathParts[i];
-                    }
-                    SetDlgItemTextW(hDlg, IDC_EDIT_REGISTRY_PATH, fullPath.c_str());
+                    SetDlgItemTextW(hDlg, IDC_EDIT_REGISTRY_PATH, Utils::StringHelper::UTF8ToWide(fullPathStr).c_str());
 
                     // 1. 请求值
                     SendRegistryRequest(hDlg, clientId, pnmtv->itemNew.hItem, 2);
@@ -390,39 +382,8 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                     wchar_t valName[256];
                     ListView_GetItemText(hList, iSelected, 0, valName, 256);
                     
-                    // 获取当前路径
-                    std::string path = "";
-                    HTREEITEM hItem = TreeView_GetSelection(hTree);
-                    std::vector<std::string> pathParts;
                     uint32_t rootIdx = 0;
-                    
-                    while (hItem) {
-                        TVITEMW tvi = { 0 };
-                        wchar_t text[256];
-                        tvi.mask = TVIF_TEXT | TVIF_PARAM;
-                        tvi.pszText = text;
-                        tvi.cchTextMax = 256;
-                        tvi.hItem = hItem;
-                        if (TreeView_GetItem(hTree, &tvi)) {
-                            HTREEITEM hParent = TreeView_GetParent(hTree, hItem);
-                            bool isRoot = (hParent == NULL);
-
-                            if (isRoot && tvi.lParam >= 0 && tvi.lParam < 5) {
-                                rootIdx = (uint32_t)tvi.lParam;
-                                const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
-                                pathParts.push_back(rootKeys[tvi.lParam]);
-                            } else {
-                                pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
-                                if (tvi.lParam >= 0 && tvi.lParam < 5) rootIdx = (uint32_t)tvi.lParam;
-                            }
-                        }
-                        hItem = TreeView_GetParent(hTree, hItem);
-                    }
-                    std::reverse(pathParts.begin(), pathParts.end());
-                    for (size_t i = 1; i < pathParts.size(); i++) {
-                        if (i > 1) path += "\\";
-                        path += pathParts[i];
-                    }
+                    std::string path = GetCurrentRegistryPath(hTree, TreeView_GetSelection(hTree), rootIdx);
                     
                     std::string fullData = path + "|" + Utils::StringHelper::WideToUTF8(valName);
                     
@@ -459,38 +420,8 @@ INT_PTR CALLBACK RegistryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam,
                     
                     if (tvi.lParam >= 5) { // 不允许删除根键
                         if (MessageBoxW(hDlg, L"确定要删除选中的项及其所有子项吗？", L"确认删除", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                            // 获取路径逻辑同上... 为了简洁这里直接复用
-                            std::string path = "";
-                            HTREEITEM hItem = hSelected;
-                            std::vector<std::string> pathParts;
                             uint32_t rootIdx = 0;
-                            while (hItem) {
-                                TVITEMW tvi2 = { 0 };
-                                wchar_t text[256];
-                                tvi2.mask = TVIF_TEXT | TVIF_PARAM;
-                                tvi2.pszText = text;
-                                tvi2.cchTextMax = 256;
-                                tvi2.hItem = hItem;
-                                if (TreeView_GetItem(hTree, &tvi2)) {
-                                    HTREEITEM hParent = TreeView_GetParent(hTree, hItem);
-                                    bool isRoot = (hParent == NULL);
-
-                                    if (isRoot && tvi2.lParam >= 0 && tvi2.lParam < 5) {
-                                        rootIdx = (uint32_t)tvi2.lParam;
-                                        const char* rootKeys[] = {"HKEY_CLASSES_ROOT", "HKEY_CURRENT_USER", "HKEY_LOCAL_MACHINE", "HKEY_USERS", "HKEY_CURRENT_CONFIG"};
-                                        pathParts.push_back(rootKeys[tvi2.lParam]);
-                                    } else {
-                                        pathParts.push_back(Utils::StringHelper::WideToUTF8(text));
-                                        if (tvi2.lParam >= 0 && tvi2.lParam < 5) rootIdx = (uint32_t)tvi2.lParam;
-                                    }
-                                }
-                                hItem = TreeView_GetParent(hTree, hItem);
-                            }
-                            std::reverse(pathParts.begin(), pathParts.end());
-                            for (size_t i = 1; i < pathParts.size(); i++) {
-                                if (i > 1) path += "\\";
-                                path += pathParts[i];
-                            }
+                            std::string path = GetCurrentRegistryPath(hTree, hSelected, rootIdx);
 
                             Formidable::CommandPkg pkg = { 0 };
                             pkg.cmd = Formidable::CMD_REGISTRY_CTRL;

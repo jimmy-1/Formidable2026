@@ -10,6 +10,9 @@
     *   **关键组件**: MSVC v143 (或 v142), Windows 10/11 SDK, MFC/ATL。
 *   **Git**: 用于版本管理。
 *   **Python 3**: (可选) 用于运行辅助脚本（如编码转换、DLL 部署）。
+*   **Nim 编译器**: 用于编译 `FormidableNim` 模块。
+    *   项目内置路径: `tools/nim-2.2.0/bin`
+    *   **重要**: 必须将上述 `bin` 目录添加到系统环境变量 `Path` 中，否则编译 `FormidableNim` 时会报 `MSB3073` 错误。
 
 ---
 
@@ -25,11 +28,17 @@
 2.  **Modules (功能 DLL)**
     *   **作用**: 生成各功能的 DLL 插件。
     *   **注意**: 必须在 `Common` 编译完成后进行。请逐一或批量编译 `Modules/` 目录下的所有子项目。
-3.  **ClientSide/Client (被控端 Loader)**
-    *   **作用**: 生成 `Client.exe`。
-    *   **配置**: 确保在 Release 模式下编译以减小体积并增强隐蔽性。
+3.  **ClientSide (被控端)**
+    *   **FormidableNim (推荐)**:
+        *   **路径**: `ClientSide/FormidableNim/FormidableNim.vcxproj`
+        *   **作用**: 生成 `FormidableNim.exe`。这是新一代被控端，具备更好的免杀能力。
+        *   **注意**: **必须**在编译 `Master` 之前编译此项目。主控端在编译时会将生成的 `FormidableNim.exe` 作为资源嵌入。
+    *   **Client (Legacy)**:
+        *   **路径**: `ClientSide/Client/Client.vcxproj`
+        *   **作用**: 生成 `Client.exe` (C++ 版本)。
 4.  **Master (管理端 GUI)**
     *   **作用**: 生成 `Master.exe`。
+    *   **资源依赖**: 编译时会自动寻找并嵌入 `FormidableNim.exe`。请确保第 3 步已完成。
     *   **部署**: 编译完成后，建议运行根目录下的 `deploy_dlls.bat`，将生成的模块 DLL 自动拷贝到主控端可调用的目录下。
 
 ### 2.2 平台配置 (Configuration)

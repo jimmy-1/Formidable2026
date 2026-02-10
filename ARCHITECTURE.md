@@ -21,20 +21,22 @@ Formidable2026 是一个基于 Windows 平台的高性能远程管理系统（RA
 graph TD
     User[操作员] --> Master[主控端 (Master.exe)]
     Master -- TCP/UDP (IOCP) --> Internet[互联网/局域网]
-    Internet --> Client[被控端 (Client)]
+    Internet --> Client[被控端 (C++ / Nim)]
     
-    subgraph ClientSide [被控端架构]
-        Loader[启动器 (EXE)] --> Core[核心引擎 (ClientCore)]
+    subgraph ClientSide_CPP [C++ 被控端]
+        Loader[启动器 (EXE)] --> Core[核心引擎]
         Core --> Network[网络模块]
-        Core --> TaskMgr[任务调度]
         Core --> ModMgr[内存模块管理器]
-        
-        ModMgr -.-> Mod1[文件管理模块]
-        ModMgr -.-> Mod2[进程管理模块]
-        ModMgr -.-> Mod3[桌面监控模块]
-        ModMgr -.-> Mod4[交互式终端]
-        ModMgr -.-> Mod5[其他功能模块...]
     end
+
+    subgraph ClientSide_Nim [Nim 被控端]
+        NimLoader[Nim 启动器] --> Syscalls[系统调用]
+        NimLoader --> MemLoad[Shellcode 加载]
+        NimLoader --> NimCore[Nim 核心逻辑]
+    end
+    
+    Client -.-> ClientSide_CPP
+    Client -.-> ClientSide_Nim
 ```
 
 ### 2.2 目录结构详解

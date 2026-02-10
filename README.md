@@ -1,18 +1,21 @@
 ﻿# Formidable2026
 
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)
-![Language](https://img.shields.io/badge/Language-C%2B%2B17-orange.svg)
+![Language](https://img.shields.io/badge/Language-C%2B%2B17%20%7C%20Nim-orange.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
 **Formidable2026** 是一个下一代 Windows 远程管理工具（RAT），专为红队行动和安全研究设计。它具备高度模块化、隐蔽性强、通信稳定等特点，支持从 Windows 7 到 Windows 11 的全系列操作系统。
 
-> **⚠️ 免责声明**: 本项目仅供网络安全研究和教育使用。严禁用于非法用途。开发者不会对任何因使用本软件造成的损失承担责任。
+> **⚠️ 严正声明**: 本项目仅供网络安全研究、授权渗透测试和教育使用。**严禁**将本项目用于任何非法用途（包括但不限于未经授权的攻击、勒索、窃密等）。利用本项目进行的任何非法行为，后果由使用者自行承担，开发者不承担任何法律责任。
 
 ---
 
 ## ✨ 功能特性
 
 ### 核心功能
+*   **双引擎被控端**: 
+    *   **C++ 原生版**: 稳定、兼容性好，支持全功能模块。
+    *   **Nim 进化版**: 基于 Nim 语言重构，利用其独特的编译特性实现优秀的静态免杀效果，支持 Shellcode 注入与 syscall 调用。
 *   **多启动模式**: 支持标准 EXE 启动，并集成多种自启动持久化技术。
 *   **高性能通信**: 基于 IOCP (HPSocket) 模型，支持 TCP/UDP 多协议切换，稳定支持数千台设备并发在线。
 *   **完全无文件落地**: 核心功能模块采用反射式 DLL 注入（Reflective DLL Injection）技术，全内存执行。
@@ -34,7 +37,9 @@
 
 ```text
 Formidable2026/
-├── ClientSide/         # [被控端] 启动器与安全增强
+├── ClientSide/         # [被控端]
+│   ├── Client/         #   ├── [C++] 原生 C++ 启动器 (Legacy)
+│   └── FormidableNim/  #   └── [Nim] 基于 Nim 语言的新一代被控端 (推荐)
 ├── Common/             # [公共库] 协议定义、内存加载引擎 (MemoryModule)、工具类
 ├── Master/             # [主控端] Win32 原生 GUI 管理控制台
 ├── Modules/            # [功能模块] 独立编译的功能插件 DLL
@@ -50,6 +55,7 @@ Formidable2026/
 *   Visual Studio 2022 (推荐) 或 2019
 *   Windows SDK 10.0+
 *   Python 3 (可选，用于辅助脚本)
+*   **一键配置环境**: 请右键管理员运行项目根目录下的 `setup_env.bat`，它会自动将内置的 Nim 编译器添加到系统环境变量中。
 
 ### 2. 编译项目
 请严格按照以下顺序编译 (详细指南见 [DEVELOPMENT.md](DEVELOPMENT.md)):

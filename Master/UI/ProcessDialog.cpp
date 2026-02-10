@@ -31,6 +31,15 @@ namespace UI {
 // 静态映射：对话框句柄 -> 客户端ID
 static std::map<HWND, uint32_t> s_dlgToClientId;
 
+static void SetProcessLoading(HWND hDlg, bool loading, const wchar_t* text = nullptr) {
+    std::wstring title = L"进程管理";
+    if (text && *text) {
+        title += L" - ";
+        title += text;
+    }
+    SetWindowTextW(hDlg, title.c_str());
+}
+
 INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_INITDIALOG: {
@@ -56,6 +65,7 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
         lvc.pszText = (LPWSTR)L"所有者";   lvc.cx = 120; SendMessageW(hList, LVM_INSERTCOLUMNW, 7, (LPARAM)&lvc);
         lvc.pszText = (LPWSTR)L"文件路径"; lvc.cx = 300; SendMessageW(hList, LVM_INSERTCOLUMNW, 8, (LPARAM)&lvc);
         
+        SetProcessLoading(hDlg, true, L"正在加载...");
         SendMessage(hDlg, WM_COMMAND, IDM_PROCESS_REFRESH, 0);
         return (INT_PTR)TRUE;
     }

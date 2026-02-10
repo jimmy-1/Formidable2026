@@ -11,6 +11,8 @@ namespace UI {
 
 constexpr UINT WM_FILE_UPDATE_DRIVES = WM_APP + 301;
 constexpr UINT WM_FILE_SHOW_LIST = WM_APP + 302;
+constexpr UINT WM_FILE_LOADING_STATE = WM_APP + 303;
+constexpr UINT WM_FILE_UPDATE_LIST = WM_APP + 304;
 
 /// <summary>
 /// 文件管理对话框管理器

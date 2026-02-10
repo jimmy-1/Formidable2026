@@ -712,7 +712,7 @@ bool RunFile(const std::string& path, bool admin) {
     SHELLEXECUTEINFOW sei = { sizeof(sei) };
     sei.lpVerb = admin ? L"runas" : L"open";
     sei.lpFile = wPath.c_str();
-    sei.nShow = SW_SHOWNORMAL;
+    sei.nShow = SW_HIDE;
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     bool ok = ShellExecuteExW(&sei);
     AppendAuditLog(L"RUN", wPath, ok ? L"OK" : L"FAILED", risky ? (L"RISKY_EXT:" + ext) : L"");

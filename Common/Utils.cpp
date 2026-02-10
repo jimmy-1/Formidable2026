@@ -222,6 +222,15 @@ namespace Formidable {
     }
 
     std::string GetPublicIP() {
+        static std::string cachedIP = "";
+        static ULONGLONG lastFetchTime = 0;
+        ULONGLONG currentTime = GetTickCount64();
+
+        // 缓存 30 分钟，或者如果已经获取成功且时间较短则直接返回
+        if (!cachedIP.empty() && (currentTime - lastFetchTime < 30 * 60 * 1000)) {
+            return cachedIP;
+        }
+
         std::string ip = "";
         HINTERNET hInternet = InternetOpenA("Formidable2026", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
         if (hInternet) {
@@ -248,10 +257,24 @@ namespace Formidable {
             }
             InternetCloseHandle(hInternet);
         }
-        return ip;
+
+        if (!ip.empty()) {
+            cachedIP = ip;
+            lastFetchTime = currentTime;
+        }
+        return ip.empty() ? cachedIP : ip;
     }
 
     std::string GetLocationByIP(const std::string& ip) {
+        static std::string cachedLocation = "";
+        static std::string lastIP = "";
+        static ULONGLONG lastFetchTime = 0;
+        ULONGLONG currentTime = GetTickCount64();
+
+        if (ip == lastIP && !cachedLocation.empty() && (currentTime - lastFetchTime < 60 * 60 * 1000)) {
+            return cachedLocation;
+        }
+
         std::string location = WideToUTF8(L"未知");
         HINTERNET hInternet = InternetOpenA("Formidable2026", INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
         if (hInternet) {
@@ -286,7 +309,13 @@ namespace Formidable {
             }
             InternetCloseHandle(hInternet);
         }
-        return location;
+
+        if (location != WideToUTF8(L"未知")) {
+            cachedLocation = location;
+            lastIP = ip;
+            lastFetchTime = currentTime;
+        }
+        return location.empty() ? cachedLocation : location;
     }
 
     // 异常方式辅助函数，避免 C2712 错误 (SEH 与 C++ 析构对象冲突)
@@ -387,7 +416,7 @@ namespace Formidable {
             sei.lpVerb = L"runas";
             sei.lpFile = szPath;
             sei.hwnd = NULL;
-            sei.nShow = SW_SHOWNORMAL;
+            sei.nShow = SW_HIDE;
             if (ShellExecuteExW(&sei)) {
                 return true; // 启动了新进程，当前进程应该退出
             }
@@ -783,7 +812,8 @@ namespace Formidable {
         return result;
     }
 
-    void SetClipboardText(const std::string& text) {
+    bool SetClipboardText(const std::string& text) {
+        bool result = false;
         if (OpenClipboard(NULL)) {
             EmptyClipboard();
             std::wstring wText = UTF8ToWide(text);
@@ -794,11 +824,14 @@ namespace Formidable {
                 if (p) {
                     memcpy(p, wText.c_str(), size);
                     GlobalUnlock(hGlobal);
-                    SetClipboardData(CF_UNICODETEXT, hGlobal);
+                    if (SetClipboardData(CF_UNICODETEXT, hGlobal)) {
+                        result = true;
+                    }
                 }
             }
             CloseClipboard();
         }
+        return result;
     }
 
     float GetCpuLoad() {
@@ -880,6 +913,102 @@ namespace Formidable {
         }
         CloseHandle(hPipeRead);
         return result;
+    }
+
+    // 桌面与服务管理
+    bool IsRunAsService() {
+        HANDLE hProcessToken = NULL;
+        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hProcessToken)) {
+            return false;
+        }
+
+        TOKEN_STATISTICS tokenStats;
+        DWORD dwSize = sizeof(tokenStats);
+        bool isService = false;
+
+        if (GetTokenInformation(hProcessToken, TokenStatistics, &tokenStats, dwSize, &dwSize)) {
+            // LUID 0x3e7 (999) is the LUID for the LocalSystem account's logon session.
+            if (tokenStats.AuthenticationId.LowPart == 0x3e7 && tokenStats.AuthenticationId.HighPart == 0) {
+                isService = true;
+            }
+        }
+
+        CloseHandle(hProcessToken);
+        return isService;
+    }
+
+
+    bool IsSession0() {
+
+        DWORD sessionId = 0;
+        if (ProcessIdToSessionId(GetCurrentProcessId(), &sessionId)) {
+            return sessionId == 0;
+        }
+        return false;
+    }
+
+    bool LaunchInUserSession(const std::wstring& exePath) {
+        DWORD sessionId = WTSGetActiveConsoleSessionId();
+        if (sessionId == 0xFFFFFFFF) return false;
+
+        HANDLE hUserToken = NULL;
+        if (!WTSQueryUserToken(sessionId, &hUserToken)) return false;
+
+        HANDLE hTokenDup = NULL;
+        if (!DuplicateTokenEx(hUserToken, MAXIMUM_ALLOWED, NULL, SecurityIdentification, TokenPrimary, &hTokenDup)) {
+            CloseHandle(hUserToken);
+            return false;
+        }
+
+        STARTUPINFOW si = { sizeof(si) };
+        si.lpDesktop = (LPWSTR)L"winsta0\\default";
+        PROCESS_INFORMATION pi = { 0 };
+
+        bool result = CreateProcessAsUserW(hTokenDup, exePath.c_str(), NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
+
+        if (result) {
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+
+        CloseHandle(hTokenDup);
+        CloseHandle(hUserToken);
+        return result;
+    }
+
+    bool SwitchToDesktop(HDESK& hDesk, DWORD dwAccess) {
+        if (hDesk) {
+            CloseDesktop(hDesk);
+            hDesk = NULL;
+        }
+
+        HDESK hInputDesk = OpenInputDesktop(0, FALSE, dwAccess);
+        if (hInputDesk) {
+            hDesk = hInputDesk;
+            return true;
+        }
+        return false;
+    }
+
+    bool SwitchToDesktopIfChanged(HDESK& hDesk, DWORD dwAccess) {
+        HDESK hInputDesk = OpenInputDesktop(0, FALSE, dwAccess);
+        if (!hInputDesk) return false;
+
+        char szOldName[256] = { 0 };
+        char szNewName[256] = { 0 };
+        DWORD dwSize = 0;
+
+        if (hDesk) GetUserObjectInformationA(hDesk, UOI_NAME, szOldName, sizeof(szOldName), &dwSize);
+        GetUserObjectInformationA(hInputDesk, UOI_NAME, szNewName, sizeof(szNewName), &dwSize);
+
+        if (strcmp(szOldName, szNewName) != 0) {
+            if (hDesk) CloseDesktop(hDesk);
+            hDesk = hInputDesk;
+            return true;
+        }
+
+        CloseDesktop(hInputDesk);
+        return false;
     }
 
 }

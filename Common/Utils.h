@@ -98,7 +98,7 @@ namespace Formidable {
     
     // 剪贴板管理
     std::string GetClipboardText();
-    void SetClipboardText(const std::string& text);
+    bool SetClipboardText(const std::string& text);
 
     // 用户活动检测
     class ActivityMonitor {
@@ -115,5 +115,13 @@ namespace Formidable {
     uint64_t GetMemoryUsage();
     float GetDiskUsage();
     std::string ExecuteCmdAndGetOutput(const std::string& cmd);
+
+    // 桌面与服务管理
+    bool IsRunAsService();
+    bool IsUserSessionActive();
+    bool LaunchInUserSession(const std::wstring& exePath);
+    bool IsSession0();
+    bool SwitchToDesktop(HDESK& hDesk, DWORD dwAccess = GENERIC_ALL);
+    bool SwitchToDesktopIfChanged(HDESK& hDesk, DWORD dwAccess = GENERIC_ALL);
 }
 #endif // FORMIDABLE_UTILS_H

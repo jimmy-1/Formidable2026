@@ -38,11 +38,12 @@ void LoadSettings() {
     GetPrivateProfileStringW(L"FRP", L"ProxyName", L"Formidable_Master", g_Settings.szFrpProxyName, 64, g_Settings.szConfigPath);
     g_Settings.frpDownloadPort = GetPrivateProfileIntW(L"FRP", L"DownloadPort", 80, g_Settings.szConfigPath);
 
-    // 加载桌面管理设置
+    // 桌面设置
     g_Settings.screenCaptureMethod = GetPrivateProfileIntW(L"Desktop", L"CaptureMethod", 0, g_Settings.szConfigPath);
     g_Settings.imageCompressMethod = GetPrivateProfileIntW(L"Desktop", L"CompressMethod", 0, g_Settings.szConfigPath);
-    g_Settings.enableMultiMonitor = GetPrivateProfileIntW(L"Desktop", L"MultiMonitor", 0, g_Settings.szConfigPath) != 0;
-    g_Settings.useDiffTransmission = GetPrivateProfileIntW(L"Desktop", L"UseDiff", 1, g_Settings.szConfigPath) != 0;
+    g_Settings.imageQuality = GetPrivateProfileIntW(L"Desktop", L"ImageQuality", 70, g_Settings.szConfigPath);
+    g_Settings.enableMultiMonitor = GetPrivateProfileIntW(L"Desktop", L"EnableMultiMonitor", 1, g_Settings.szConfigPath) != 0;
+    g_Settings.useDiffTransmission = GetPrivateProfileIntW(L"Desktop", L"UseDiffTransmission", 1, g_Settings.szConfigPath) != 0;
 
     // 加载预存备注
     LoadClientRemarks();
@@ -68,13 +69,12 @@ void SaveSettings() {
     swprintf_s(szBuf, L"%d", g_Settings.frpDownloadPort);
     WritePrivateProfileStringW(L"FRP", L"DownloadPort", szBuf, g_Settings.szConfigPath);
 
-    // 保存桌面管理设置
-    swprintf_s(szBuf, L"%d", g_Settings.screenCaptureMethod);
-    WritePrivateProfileStringW(L"Desktop", L"CaptureMethod", szBuf, g_Settings.szConfigPath);
-    swprintf_s(szBuf, L"%d", g_Settings.imageCompressMethod);
-    WritePrivateProfileStringW(L"Desktop", L"CompressMethod", szBuf, g_Settings.szConfigPath);
-    WritePrivateProfileStringW(L"Desktop", L"MultiMonitor", g_Settings.enableMultiMonitor ? L"1" : L"0", g_Settings.szConfigPath);
-    WritePrivateProfileStringW(L"Desktop", L"UseDiff", g_Settings.useDiffTransmission ? L"1" : L"0", g_Settings.szConfigPath);
+    // 桌面设置
+    WritePrivateProfileStringW(L"Desktop", L"CaptureMethod", std::to_wstring(g_Settings.screenCaptureMethod).c_str(), g_Settings.szConfigPath);
+    WritePrivateProfileStringW(L"Desktop", L"CompressMethod", std::to_wstring(g_Settings.imageCompressMethod).c_str(), g_Settings.szConfigPath);
+    WritePrivateProfileStringW(L"Desktop", L"ImageQuality", std::to_wstring(g_Settings.imageQuality).c_str(), g_Settings.szConfigPath);
+    WritePrivateProfileStringW(L"Desktop", L"EnableMultiMonitor", g_Settings.enableMultiMonitor ? L"1" : L"0", g_Settings.szConfigPath);
+    WritePrivateProfileStringW(L"Desktop", L"UseDiffTransmission", g_Settings.useDiffTransmission ? L"1" : L"0", g_Settings.szConfigPath);
 
     // 保存预存备注
     SaveClientRemarks();

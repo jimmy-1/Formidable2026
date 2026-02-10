@@ -74,6 +74,7 @@ struct ServerSettings {
     // 桌面管理设置
     int screenCaptureMethod; // 0=GDI, 1=DirectX
     int imageCompressMethod; // 0=JPEG, 1=PNG
+    int imageQuality;        // 图像质量 (0-100)
     bool enableMultiMonitor; // 是否启用多显示器支持
     bool useDiffTransmission; // 是否使用差异传输
 };
