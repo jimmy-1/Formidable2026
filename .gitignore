@@ -63,3 +63,7 @@ thirdparty/Bin/avcodec-62.dll
 !ClientSide/FormidableNim/utils/sRDI/**
 !ClientSide/FormidableNim/utils/sRDI/**/*.exe
 !ClientSide/FormidableNim/utils/sRDI/**/*.dll
+
+# Build artifacts
+ClientSide/FormidableNim/src/*.bin
+ClientSide/FormidableNim/src/*.res

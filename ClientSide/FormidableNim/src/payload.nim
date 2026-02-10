@@ -169,7 +169,7 @@ proc get_sysinfo(info: var ClientInfo) =
     info.is64Bit = false
     
   # OS Version (Simplified)
-  assign(info.osVersion, "Windows (Nim)")
+  info.osVersion = toCharArray[64]("Windows (Nim)")
   
   # Group
   for i in 0 ..< min(info.group.len, g_config.szGroupName.len):
@@ -205,7 +205,7 @@ var sock: lean.SOCKET = INVALID_SOCKET
 
 proc send_pkg(s: lean.SOCKET, cmd: uint32, data: pointer, len: int) =
   var header: PkgHeader
-  assign(header.flag, "FRMD26?")
+  header.flag = toCharArray[8]("FRMD26?")
   
   header.originLen = int32(sizeof(CommandPkg) + len) 
   header.totalLen = int32(sizeof(PkgHeader) + header.originLen)
