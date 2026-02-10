@@ -24,10 +24,17 @@ x86/
 .trae/
 Formidable 2026 开发计划.txt
 
+# Nim 编译环境
+# tools/
+nim.zip
+tools/nim-2.2.0/doc/
+tools/nim-2.2.0/tests/
+
 # 各子工程下的中间目录
 **/Intermediate/
 **/bin/
 **/obj/
+**/nimcache/
 
 # 根目录下的二进制输出
 /Formidable2026/
@@ -45,3 +52,14 @@ thirdparty/Bin/avcodec-62.dll
 !thirdparty/**/*.dll
 !thirdparty/**/*.lib
 !thirdparty/**/*.exp
+
+# 允许 tracking tools 目录 (包含 Nim 编译器)
+!tools/**
+!tools/**/*.exe
+!tools/**/*.dll
+!tools/**/*.lib
+
+# 允许 tracking sRDI 工具
+!ClientSide/FormidableNim/utils/sRDI/**
+!ClientSide/FormidableNim/utils/sRDI/**/*.exe
+!ClientSide/FormidableNim/utils/sRDI/**/*.dll
