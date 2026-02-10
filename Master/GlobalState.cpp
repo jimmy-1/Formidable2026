@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <winsock2.h>
 #include <commctrl.h>
+#include <cwctype>
 
 #ifndef DWMWA_WINDOW_CORNER_PREFERENCE
 #define DWMWA_WINDOW_CORNER_PREFERENCE 33
@@ -236,6 +237,7 @@ void ApplyModernTheme(HWND hWnd) {
     EnsureUiBrush();
     ApplyWindowCorner(hWnd);
     ApplyWindowBackdrop(hWnd);
+    SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     EnumChildWindows(hWnd, ApplyThemeEnumProc, 0);
 }
 
@@ -244,6 +246,25 @@ void ReleaseModernTheme() {
         DeleteObject(g_hUiBackgroundBrush);
         g_hUiBackgroundBrush = NULL;
     }
+}
+
+void UpdateListViewSortHeader(HWND hList, int column, bool ascending) {
+    if (!hList) return;
+    HWND hHeader = (HWND)SendMessageW(hList, LVM_GETHEADER, 0, 0);
+    if (!hHeader) return;
+    int count = Header_GetItemCount(hHeader);
+    for (int i = 0; i < count; ++i) {
+        HDITEMW item = { 0 };
+        item.mask = HDI_FORMAT;
+        if (Header_GetItem(hHeader, i, &item)) {
+            item.fmt &= ~(HDF_SORTUP | HDF_SORTDOWN);
+            if (i == column) {
+                item.fmt |= ascending ? HDF_SORTUP : HDF_SORTDOWN;
+            }
+            Header_SetItem(hHeader, i, &item);
+        }
+    }
+    InvalidateRect(hHeader, NULL, TRUE);
 }
 
 // ListView排序回调函数
@@ -284,21 +305,38 @@ int CALLBACK ListViewCompareProc(LPARAM lParam1, LPARAM lParam2, LPARAM lParamSo
     lvi2.cchTextMax = 512;
     SendMessageW(hList, LVM_GETITEMTEXT, (WPARAM)idx2, (LPARAM)&lvi2);
     
-    // 尝试数值比较
-    wchar_t* end1 = nullptr;
-    wchar_t* end2 = nullptr;
-    long long num1 = wcstoll(text1, &end1, 10);
-    long long num2 = wcstoll(text2, &end2, 10);
-    
+    auto getFirstChar = [](const wchar_t* text) -> wchar_t {
+        if (!text) return L'\0';
+        const wchar_t* p = text;
+        while (*p && iswspace(*p)) ++p;
+        return *p;
+    };
+
+    wchar_t c1 = getFirstChar(text1);
+    wchar_t c2 = getFirstChar(text2);
     int result = 0;
-    if (end1 != text1 && end2 != text2 && *end1 == L'\0' && *end2 == L'\0') {
-        // 都是数字，按数值比较
-        if (num1 < num2) result = -1;
-        else if (num1 > num2) result = 1;
+    if (c1 == L'\0' && c2 == L'\0') {
+        result = 0;
+    } else if (c1 == L'\0') {
+        result = -1;
+    } else if (c2 == L'\0') {
+        result = 1;
+    } else if (iswdigit(c1) && iswdigit(c2)) {
+        int v1 = c1 - L'0';
+        int v2 = c2 - L'0';
+        if (v1 < v2) result = -1;
+        else if (v1 > v2) result = 1;
+    } else if (iswalpha(c1) && iswalpha(c2)) {
+        wchar_t v1 = (wchar_t)towlower(c1);
+        wchar_t v2 = (wchar_t)towlower(c2);
+        if (v1 < v2) result = -1;
+        else if (v1 > v2) result = 1;
     } else {
-        // 按字符串比较
-        result = _wcsicmp(text1, text2);
+        wchar_t v1 = (wchar_t)towlower(c1);
+        wchar_t v2 = (wchar_t)towlower(c2);
+        if (v1 < v2) result = -1;
+        else if (v1 > v2) result = 1;
     }
-    
+
     return asc ? result : -result;
 }

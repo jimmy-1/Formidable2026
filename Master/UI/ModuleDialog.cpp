@@ -70,6 +70,7 @@ INT_PTR CALLBACK ModuleDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lP
                 }
 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
             }
         }
         break;

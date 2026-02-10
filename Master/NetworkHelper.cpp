@@ -102,8 +102,13 @@ void HeartbeatThread() {
                     continue;
                 }
                 
-                client->lastHeartbeatSendTime = now;
-                SendSimpleCommand(pair.first, CMD_HEARTBEAT);
+                // 只有在收到过客户端的第一个包（lastHeartbeat > 0）之后，才开始主动发送心跳
+                // 这样可以确保服务端已经正确识别了客户端的加密协议 (iHeaderEnc)
+                // 避免在握手初期发送协议不匹配的心跳包导致客户端断开
+                if (client->lastHeartbeat > 0) {
+                    client->lastHeartbeatSendTime = now;
+                    SendSimpleCommand(pair.first, CMD_HEARTBEAT);
+                }
             }
         }
         Sleep(5000);

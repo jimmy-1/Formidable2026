@@ -16,33 +16,15 @@
 #include "../../Common/Config.h"
 #include "../../Common/Module.h"
 #include "../../Common/Utils.h"
+#include "../../Common/NetworkHelper.h"
 
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
 using namespace Formidable;
 
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = len;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-    
-    const char* pData = buffer.data();
-    int remaining = (int)buffer.size();
-    while (remaining > 0) {
-        int sent = send(s, pData, remaining, 0);
-        if (sent == SOCKET_ERROR) break;
-        pData += sent;
-        remaining -= sent;
-    }
+    SendPkg(s, cmd, data, len, len, 0, g_pProtocolEncoder);
 }
 
 struct LocalWindowInfo {
@@ -232,7 +214,8 @@ void ControlWindow(HWND hwnd, uint32_t action) {
 }
 
 // DLL 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
     if (pkg->cmd == CMD_WINDOW_LIST) {
         std::string result = ListWindows();
         SendResponse(s, CMD_WINDOW_LIST, result.c_str(), (int)result.size());

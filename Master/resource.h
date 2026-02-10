@@ -51,6 +51,11 @@
 #define IDC_STATIC_PAYLOAD      341
 #define IDC_STATIC_DOWNLOAD     342
 
+#define IDR_SCLOADER_X86        350
+#define IDR_SCLOADER_X64        351
+#define IDR_SCLOADER_X86_OLD    352
+#define IDR_SCLOADER_X64_OLD    353
+
 // 生成器附加控件
 #define IDC_CHECK_ADMIN         335
 #define IDC_CHECK_STARTUP       336

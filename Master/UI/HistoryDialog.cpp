@@ -170,6 +170,7 @@ INT_PTR CALLBACK HistoryDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 }
 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
                 return (INT_PTR)TRUE;
             } else if (nm->code == LVN_KEYDOWN) {
                 NMLVKEYDOWN* kd = (NMLVKEYDOWN*)lParam;

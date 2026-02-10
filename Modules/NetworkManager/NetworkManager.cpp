@@ -18,10 +18,14 @@
 #include <tlhelp32.h>
 #include "../../Common/Config.h"
 #include "../../Common/Utils.h"
+#include "../../Common/NetworkHelper.h"
 
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "iphlpapi.lib")
 
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
 using namespace Formidable;
 
 struct ProcInfo {
@@ -96,22 +100,7 @@ std::string GetProcessModulesByPid(uint32_t pid, size_t maxCount) {
 }
 
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = len;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-    
-    send(s, buffer.data(), (int)buffer.size(), 0);
+    SendPkg(s, cmd, data, len, len, 0, g_pProtocolEncoder);
 }
 
 std::string ListConnections() {
@@ -212,7 +201,8 @@ std::string ListConnections() {
 }
 
 // DLL 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
     if (pkg->cmd == CMD_NETWORK_LIST) {
         std::string result = ListConnections();
         SendResponse(s, CMD_NETWORK_LIST, result.c_str(), (int)result.size());

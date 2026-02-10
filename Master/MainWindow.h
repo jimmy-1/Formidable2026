@@ -18,6 +18,7 @@ void AddLog(const std::wstring& type, const std::wstring& msg);
 void ShowAboutDialog(HWND hWnd);
 int GetSelectedClientId();
 void HandleCommand(HWND hWnd, int id);
+void CheckAndRemoveEmptyGroup(const std::string& groupName, bool force = false);
 
 // 工具函数
 void EnsureStartupEnabled();

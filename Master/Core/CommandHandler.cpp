@@ -214,6 +214,21 @@ void CommandHandler::HandlePacket(uint32_t clientId, const BYTE* pData, int iLen
         case Formidable::CMD_FILE_DOWNLOAD:
             HandleFileDownload(clientId, pkg, iLength);
             break;
+        case Formidable::CMD_FILE_UPLOAD:
+            HandleFileUpload(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_DELETE:
+            HandleFileDelete(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_RENAME:
+            HandleFileRename(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_RUN:
+            HandleFileRun(clientId, pkg, iLength);
+            break;
+        case Formidable::CMD_FILE_MKDIR:
+            HandleFileMkdir(clientId, pkg, iLength);
+            break;
         case Formidable::CMD_FILE_SIZE:
             HandleFileSize(clientId, pkg, iLength);
             break;
@@ -343,7 +358,7 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     std::string oldIP = client->ip;
     if (client->info.publicAddr[0] != '\0') {
         std::string reportedIP = ReadIpText(client->info.publicAddr, sizeof(client->info.publicAddr));
-        if (!IsIpTextValid(reportedIP)) {
+        if (reportedIP.empty() || !IsIpTextValid(reportedIP)) {
             reportedIP.clear();
         }
         // 如果当前记录的IP是本地回环或内网IP，或者为空，则强制使用报告的公网IP
@@ -390,6 +405,9 @@ void CommandHandler::HandleClientInfo(uint32_t clientId, const Formidable::Clien
     }
     
     std::wstring wIP = Utils::StringHelper::UTF8ToWide(client->ip);
+    if (wIP.empty() && !client->ip.empty()) {
+        wIP = Utils::StringHelper::ANSIToWide(client->ip);
+    }
     int index = client->listIndex;
 
     SendMessageW(g_hListClients, WM_SETREDRAW, FALSE, 0);
@@ -894,7 +912,6 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                      rootIdx = (uint32_t)tviParent.lParam;
                  }
 
-                 // Binary Format Parsing: [Count:4] [Reserve:4] ([Len:4][Name])...
                  if (dataLen >= 8) {
                      uint32_t count = 0;
                      memcpy(&count, pData, 4);
@@ -915,15 +932,19 @@ void CommandHandler::HandleRegistryData(uint32_t clientId, const Formidable::Com
                          tvis.hInsertAfter = TVI_LAST;
                          tvis.item.mask = TVIF_TEXT | TVIF_CHILDREN | TVIF_PARAM;
                          tvis.item.pszText = (LPWSTR)wKey.c_str();
-                         tvis.item.cChildren = 1; // 假设有子项，支持展开
-                         
-                         // 重要：子项不要存储 rootIdx 到 lParam，否则会导致路径解析逻辑混淆根节点
-                         // 我们在这里将 lParam 设为一个非 rootIdx 的值，比如 0x80000000
+                         tvis.item.cChildren = 1;
                          tvis.item.lParam = (LPARAM)0x80000000; 
                          TreeView_InsertItem(hTree, &tvis);
                      }
+                     TVITEMW tviNode = { 0 };
+                     tviNode.mask = TVIF_CHILDREN;
+                     tviNode.hItem = hSelected;
+                     tviNode.cChildren = (count > 0) ? 1 : 0;
+                     TreeView_SetItem(hTree, &tviNode);
                      SendMessage(hTree, WM_SETREDRAW, TRUE, 0);
-                     TreeView_Expand(hTree, hSelected, TVE_EXPAND);
+                     if (count > 0) {
+                         TreeView_Expand(hTree, hSelected, TVE_EXPAND);
+                     }
                  }
              }
         } else if (pkg->arg2 == 2) { // Values for List
@@ -1100,6 +1121,187 @@ void CommandHandler::HandleFileDownload(uint32_t clientId, const Formidable::Com
             client->hFileDownload = INVALID_HANDLE_VALUE;
         }
         MessageBoxW(client->hFileDlg, L"权限不足，下载被拒绝", L"错误", MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileUpload(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string status(pkg->data, pkg->arg1);
+    if (status == "READY") {
+        HWND hStatusBar = GetDlgItem(client->hFileDlg, IDC_STATUS_FILE_BAR);
+        if (hStatusBar) SendMessageW(hStatusBar, WM_SETTEXT, 0, (LPARAM)L"开始上传文件...");
+        return;
+    }
+    if (status == "FINISH") {
+        MessageBoxW(client->hFileDlg, L"文件上传完成", L"提示", MB_OK | MB_ICONINFORMATION);
+        PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+        return;
+    }
+    if (status == "INVALID_PATH") {
+        MessageBoxW(client->hFileDlg, L"路径无效，无法上传", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (status == "ERROR") {
+        MessageBoxW(client->hFileDlg, L"上传初始化失败", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (!status.empty()) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(status);
+        MessageBoxW(client->hFileDlg, reason.c_str(), L"上传失败", MB_OK | MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileDelete(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string data(pkg->data, pkg->arg1);
+    if (data == "SUCCESS") {
+        MessageBoxW(client->hFileDlg, L"删除成功", L"提示", MB_OK | MB_ICONINFORMATION);
+        PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+        return;
+    }
+    if (data == "FAILED") {
+        MessageBoxW(client->hFileDlg, L"删除失败", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data == "INVALID_PATH") {
+        MessageBoxW(client->hFileDlg, L"路径无效，无法删除", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data.rfind("OK|", 0) == 0) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (true) {
+            size_t pos = data.find('|', start);
+            if (pos == std::string::npos) {
+                parts.push_back(data.substr(start));
+                break;
+            }
+            parts.push_back(data.substr(start, pos - start));
+            start = pos + 1;
+        }
+        if (parts.size() >= 3) {
+            std::wstring ok = Formidable::Utils::StringHelper::UTF8ToWide(parts[1]);
+            std::wstring fail = Formidable::Utils::StringHelper::UTF8ToWide(parts[2]);
+            std::wstring msg = L"成功: " + ok + L"\r\n失败: " + fail;
+            MessageBoxW(client->hFileDlg, msg.c_str(), L"删除结果", MB_OK | MB_ICONINFORMATION);
+            PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+            return;
+        }
+    }
+    if (!data.empty()) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data);
+        MessageBoxW(client->hFileDlg, reason.c_str(), L"删除失败", MB_OK | MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileRename(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string data(pkg->data, pkg->arg1);
+    if (data == "SUCCESS") {
+        PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+        return;
+    }
+    if (data == "FAILED") {
+        MessageBoxW(client->hFileDlg, L"重命名失败", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data.rfind("OK|", 0) == 0) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (true) {
+            size_t pos = data.find('|', start);
+            if (pos == std::string::npos) {
+                parts.push_back(data.substr(start));
+                break;
+            }
+            parts.push_back(data.substr(start, pos - start));
+            start = pos + 1;
+        }
+        if (parts.size() >= 3) {
+            std::wstring ok = Formidable::Utils::StringHelper::UTF8ToWide(parts[1]);
+            std::wstring fail = Formidable::Utils::StringHelper::UTF8ToWide(parts[2]);
+            std::wstring msg = L"成功: " + ok + L"\r\n失败: " + fail;
+            MessageBoxW(client->hFileDlg, msg.c_str(), L"重命名结果", MB_OK | MB_ICONINFORMATION);
+            PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+            return;
+        }
+    }
+    if (!data.empty()) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data);
+        MessageBoxW(client->hFileDlg, reason.c_str(), L"重命名失败", MB_OK | MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileRun(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string data(pkg->data, pkg->arg1);
+    if (data == "SUCCESS") {
+        MessageBoxW(client->hFileDlg, L"执行成功", L"提示", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    if (data == "FAILED") {
+        MessageBoxW(client->hFileDlg, L"执行失败", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (!data.empty()) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data);
+        MessageBoxW(client->hFileDlg, reason.c_str(), L"执行失败", MB_OK | MB_ICONERROR);
+    }
+}
+
+void CommandHandler::HandleFileMkdir(uint32_t clientId, const Formidable::CommandPkg* pkg, int iLength) {
+    std::shared_ptr<Formidable::ConnectedClient> client;
+    {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        if (!g_Clients.count(clientId)) return;
+        client = g_Clients[clientId];
+    }
+
+    if (!client || !client->hFileDlg || !IsWindow(client->hFileDlg)) return;
+    std::string data(pkg->data, pkg->arg1);
+    if (data == "SUCCESS") {
+        PostMessageW(client->hFileDlg, WM_COMMAND, IDM_FILE_REFRESH, 0);
+        return;
+    }
+    if (data == "FAILED") {
+        MessageBoxW(client->hFileDlg, L"创建文件夹失败", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (data == "INVALID_PATH") {
+        MessageBoxW(client->hFileDlg, L"路径无效，无法创建文件夹", L"错误", MB_OK | MB_ICONERROR);
+        return;
+    }
+    if (!data.empty()) {
+        std::wstring reason = Formidable::Utils::StringHelper::UTF8ToWide(data);
+        MessageBoxW(client->hFileDlg, reason.c_str(), L"创建文件夹失败", MB_OK | MB_ICONERROR);
     }
 }
 
@@ -1615,6 +1817,9 @@ void CommandHandler::HandleBackgroundGeneric(uint32_t clientId, const Formidable
         if (pkg->cmd == CMD_BACKGROUND_CREATE || pkg->cmd == CMD_BACKGROUND_EXECUTE) {
             std::string msg((char*)pkg->data, pkg->arg1);
             std::wstring wMsg = Utils::StringHelper::UTF8ToWide(msg);
+            if (wMsg.empty() && !msg.empty()) {
+                wMsg = Utils::StringHelper::ANSIToWide(msg);
+            }
             MessageBoxW(client->hBackgroundDlg, wMsg.c_str(), L"后台管理", MB_OK | MB_ICONINFORMATION);
         }
     }

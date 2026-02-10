@@ -127,6 +127,19 @@ namespace Formidable {
         CMD_EXIT = 999          // 退出
     };
 
+    enum ProtocolEncType : int32_t {
+        PROTOCOL_SHINE = 0,
+        PROTOCOL_HELL = 1,
+    };
+
+    enum ClientCompressType : int32_t {
+        CLIENT_COMPRESS_NONE = 0,
+        CLIENT_COMPRESS_UPX = 1,
+        CLIENT_COMPRESS_SC_AES = 2,
+        CLIENT_PE_TO_SEHLLCODE = 3,
+        CLIENT_COMPRESS_SC_AES_OLD = 4,
+    };
+
 #pragma pack(push, 1)
     struct BackgroundCmdData {
         uint32_t type;          // 操作类型 (0:移动, 1:左键下, 2:左键上, 3:右键下, 4:右键上, 5:按键下, 6:按键上)

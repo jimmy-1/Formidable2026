@@ -47,6 +47,11 @@ private:
     static void HandleDriveList(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileData(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileDownload(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileUpload(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileDelete(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileRename(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileRun(uint32_t clientId, const CommandPkg* pkg, int dataLen);
+    static void HandleFileMkdir(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileSize(uint32_t clientId, const CommandPkg* pkg, int dataLen);
     static void HandleFileCompress(uint32_t clientId, const CommandPkg* pkg, int dataLen, bool compress);
     static void HandleFilePreview(uint32_t clientId, const CommandPkg* pkg, int dataLen);

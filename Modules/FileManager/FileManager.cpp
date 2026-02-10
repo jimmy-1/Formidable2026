@@ -19,6 +19,7 @@
 #include <shellapi.h>
 #include <winioctl.h>
 #include "../../Common/Config.h"
+#include "../../Common/NetworkHelper.h"
 #include "../../Common/Utils.h"
 
 using namespace Formidable;
@@ -310,30 +311,12 @@ bool NameMatch(const std::wstring& name, const std::wstring& pattern, bool caseS
     return SubstringMatch(name, pattern, caseSensitive);
 }
 
-void SendResponseEx(SOCKET s, uint32_t cmd, const void* data, int len, uint32_t arg2);
-
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
-    SendResponseEx(s, cmd, data, len, 0);
+    SendPkg(s, cmd, data, len, 0, 0, g_pProtocolEncoder);
 }
 
 void SendResponseEx(SOCKET s, uint32_t cmd, const void* data, int len, uint32_t arg2) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = len;
-    pkg->arg2 = arg2;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-    
-    send(s, buffer.data(), (int)buffer.size(), 0);
+    SendPkg(s, cmd, data, len, len, arg2, g_pProtocolEncoder);
 }
 
 std::string ListFiles(const std::string& path) {
@@ -893,8 +876,14 @@ static void HandleFileHistory(SOCKET s, const std::string& path) {
     SendResponse(s, CMD_FILE_HISTORY, out.c_str(), (int)out.size());
 }
 
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
+using namespace Formidable;
+
 // DLL 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
     if (pkg->cmd == CMD_FILE_LIST) {
         std::string path = pkg->data;
         std::string result = ListFiles(path);

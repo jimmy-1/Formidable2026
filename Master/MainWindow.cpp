@@ -28,6 +28,10 @@
 #include <gdiplus.h>
 #include "resource.h"
 #include "../Common/ClientTypes.h"
+
+// Forward declaration
+void LoadListData(const std::string& group);
+
 #include "../Common/Config.h"
 #include "../Common/Utils.h"
 #include "GlobalState.h"
@@ -79,6 +83,10 @@ static void FillRoundRect(Graphics& g, const RectF& rc, float radius, const Colo
     g.FillPath(&brush, &path);
 }
 
+static bool IsDefaultGroupName(const std::string& group) {
+    return group.empty() || group == "default" || group == "默认";
+}
+
 static std::wstring NormalizeIpText(const std::string& ip) {
     std::string trimmed = StringHelper::Trim(ip);
     if (trimmed.empty()) return L"";
@@ -91,6 +99,48 @@ static std::wstring NormalizeIpText(const std::string& ip) {
     }
     if (!clean.empty()) return UTF8ToWide(clean);
     return StringHelper::ANSIToWide(trimmed);
+}
+
+void CheckAndRemoveEmptyGroup(const std::string& groupName, bool force) {
+    if (IsDefaultGroupName(groupName)) return;
+    if (!g_hGroupTab || g_GroupList.find(groupName) == g_GroupList.end()) return;
+    if (!force) {
+        std::lock_guard<std::mutex> lock(g_ClientsMutex);
+        for (const auto& pair : g_Clients) {
+            std::string clientGroup = WideToUTF8(pair.second->group);
+            if (clientGroup == groupName) {
+                return;
+            }
+        }
+    }
+
+    int tabCount = TabCtrl_GetItemCount(g_hGroupTab);
+    std::wstring wGroup = UTF8ToWide(groupName);
+    int tabIndex = -1;
+    for (int i = 0; i < tabCount; i++) {
+        wchar_t text[128] = {};
+        TCITEMW item = { 0 };
+        item.mask = TCIF_TEXT;
+        item.pszText = text;
+        item.cchTextMax = 128;
+        if (TabCtrl_GetItem(g_hGroupTab, i, &item)) {
+            if (wGroup == text) {
+                tabIndex = i;
+                break;
+            }
+        }
+    }
+
+    if (tabIndex >= 0) {
+        TabCtrl_DeleteItem(g_hGroupTab, tabIndex);
+    }
+    g_GroupList.erase(groupName);
+
+    if (g_selectedGroup == groupName) {
+        TabCtrl_SetCurSel(g_hGroupTab, 0);
+        g_selectedGroup = "默认";
+        LoadListData(g_selectedGroup);
+    }
 }
 
 static LRESULT HandleToolbarCustomDraw(HWND hToolbar, NMTBCUSTOMDRAW* cd) {
@@ -182,7 +232,7 @@ static LRESULT HandleTabCustomDraw(HWND hTab, NMCUSTOMDRAW* cd) {
         
         // Win11 Style: Clean background, Blue underline for selected
         SolidBrush bgBrush(Color(255, 255, 255, 255)); // White background
-        g.FillRectangle(&bgBrush, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+        g.FillRectangle(&bgBrush, Rect(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top));
 
         if (selected) {
             // Blue underline
@@ -1016,10 +1066,12 @@ void HandleCommand(HWND hWnd, int id) {
                         std::string groupUtf8 = WideToUTF8(groupName);
                         
                         std::vector<uint32_t> updateClients;
+                        std::set<std::string> oldGroups;
                         {
                             std::lock_guard<std::mutex> lock(g_ClientsMutex);
                         for (auto cid : selectedClients) {
                             if (g_Clients.count(cid)) {
+                                oldGroups.insert(WideToUTF8(g_Clients[cid]->group));
                                 g_Clients[cid]->group = groupName;
                                 updateClients.push_back(cid);
                             }
@@ -1040,6 +1092,11 @@ void HandleCommand(HWND hWnd, int id) {
                         
                         LoadListData(g_selectedGroup);
                         AddLog(L"系统", L"已将 " + std::to_wstring(selectedClients.size()) + L" 个客户端设置到分组: " + groupName);
+                        for (const auto& oldGroup : oldGroups) {
+                            if (oldGroup != groupUtf8) {
+                                CheckAndRemoveEmptyGroup(oldGroup);
+                            }
+                        }
                     }
                 }
                 break;
@@ -1676,6 +1733,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 }
                 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
                 
                 {
                     std::lock_guard<std::mutex> lock(g_ClientsMutex);

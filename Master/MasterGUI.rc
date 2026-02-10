@@ -115,7 +115,7 @@ BEGIN
     DEFPUSHBUTTON   "发送", IDC_BTN_TERM_SEND, 395, 249, 50, 16
     CONTROL         "", IDC_LIST_COMMON_CMDS, "SysListView32", LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 5, 270, 440, 125
 END
-IDD_SETTINGS DIALOGEX 0, 0, 485, 425
+IDD_SETTINGS DIALOGEX 0, 0, 485, 260
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "设置"
 FONT 9, "Microsoft YaHei UI", 400, 0, 0x1
@@ -144,7 +144,7 @@ BEGIN
     LTEXT           "操作提示: 上述FRP代理转发设置如下：用服务端口+1如6544起转发本地端口；用远程映射端口7000；下载端口时80起，且与转换端口数一致；token。", IDC_STATIC, 16, 82, 460, 16
     LTEXT           "操作提示: 左侧数据报转发端口+1，如拟定转发起始端口+1时6544起配合转发本地端口；用远程映射端口7000；下载端口时80起，且与转换端口数一致；token。", IDC_STATIC, 16, 100, 460, 16
     
-    GROUPBOX        "桌面管理", IDC_STATIC, 6, 125, 472, 120
+    GROUPBOX        "桌面管理", IDC_STATIC, 6, 125, 472, 100
     LTEXT           "屏幕截图方法:", IDC_STATIC, 17, 142, 60, 8
     COMBOBOX        IDC_COMBO_CAPTURE_METHOD, 85, 140, 145, 92, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     
@@ -156,8 +156,8 @@ BEGIN
     CONTROL         "是", IDC_RADIO_MULTIMON_YES, "Button", BS_AUTORADIOBUTTON, 120, 180, 25, 10
     CONTROL         "差异传输", IDC_CHECK_DIFF_TRANS, "Button", BS_AUTOCHECKBOX | WS_TABSTOP, 170, 180, 60, 10
     
-    DEFPUSHBUTTON   "确定", IDOK, 345, 405, 60, 14
-    PUSHBUTTON      "取消", IDCANCEL, 415, 405, 60, 14
+    DEFPUSHBUTTON   "确定", IDOK, 345, 235, 60, 14
+    PUSHBUTTON      "取消", IDCANCEL, 415, 235, 60, 14
 END
 IDD_WINDOW DIALOGEX 0, 0, 450, 320
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
@@ -190,7 +190,7 @@ BEGIN
     CONTROL         "", IDC_STATIC_SCREEN, "Static", SS_BITMAP | SS_CENTERIMAGE | WS_BORDER, 0, 0, 560, 420
 END
 
-IDD_FILE DIALOGEX 0, 0, 760, 460
+IDD_FILE DIALOGEX 0, 0, 640, 380
 STYLE DS_SETFONT | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX
 CAPTION "文件管理"
 FONT 9, "Microsoft YaHei UI", 400, 0, 0x1
@@ -321,3 +321,7 @@ IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx64.exe"
 IDR_UPX_EXE             BIN     "..\\thirdparty\\Bin\\upx32.exe"
 #endif
 #endif
+
+// Shellcode Loaders
+IDR_SCLOADER_X86        BIN     "..\\Loader\\Bin\\SCLoader_x86.exe"
+IDR_SCLOADER_X64        BIN     "..\\Loader\\Bin\\SCLoader_x64.exe"

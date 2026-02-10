@@ -124,9 +124,6 @@ public:
         static NTSTATUS DirectNtWriteVirtualMemory(HANDLE ProcessHandle, PVOID BaseAddress, PVOID Buffer, SIZE_T NumberOfBytesToWrite, PSIZE_T NumberOfBytesWritten);
         static NTSTATUS DirectNtCreateThreadEx(PHANDLE ThreadHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, HANDLE ProcessHandle, PVOID StartRoutine, PVOID Argument, ULONG CreateFlags, ULONG_PTR ZeroBits, SIZE_T StackSize, SIZE_T MaximumStackSize, PVOID AttributeList);
         static NTSTATUS DirectNtTerminateProcess(HANDLE ProcessHandle, NTSTATUS ExitStatus);
-    private:
-        static DWORD GetSyscallNumber(const char* functionName);
-        static NTSTATUS InternalExecuteSyscall(DWORD syscallNum, PVOID arg1, PVOID arg2, PVOID arg3, PVOID arg4, PVOID arg5 = nullptr, PVOID arg6 = nullptr, PVOID arg7 = nullptr, PVOID arg8 = nullptr, PVOID arg9 = nullptr, PVOID arg10 = nullptr, PVOID arg11 = nullptr);
     };
 
     class StackSpoofer {

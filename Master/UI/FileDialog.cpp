@@ -580,16 +580,29 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
             SendMessageW(hNavBar, WM_SETFONT, (WPARAM)hFont, TRUE);
         }
 
-        // 创建进度条
+        RECT rcInit;
+        GetClientRect(hDlg, &rcInit);
+        int initWidth = rcInit.right - rcInit.left;
+        if (initWidth < 0) initWidth = 0;
+
         HWND hProg = CreateWindowExW(0, PROGRESS_CLASSW, NULL, WS_CHILD | WS_VISIBLE | PBS_SMOOTH | PBS_MARQUEE, 
-            0, 31, 760, 2, hDlg, (HMENU)IDC_PROGRESS_BAR, g_hInstance, NULL); // 移动到导航栏下方，高度减小，避免黑点
+            0, 31, initWidth, 2, hDlg, (HMENU)IDC_PROGRESS_BAR, g_hInstance, NULL);
         SendMessage(hProg, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
 
         // 延迟自动刷新
         SetTimer(hDlg, 1, 500, NULL);
 
         ApplyModernTheme(hDlg);
+        PostMessageW(hDlg, WM_SIZE, 0, 0);
         
+        return (INT_PTR)TRUE;
+    }
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO* pInfo = (MINMAXINFO*)lParam;
+        if (pInfo) {
+            pInfo->ptMinTrackSize.x = 560;
+            pInfo->ptMinTrackSize.y = 360;
+        }
         return (INT_PTR)TRUE;
     }
     case WM_TIMER:
@@ -1105,6 +1118,7 @@ INT_PTR CALLBACK FileDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPA
                 }
 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
             }
         } else if (nm->idFrom == IDC_TREE_NAV) {
             if (nm->code == TVN_SELCHANGEDW) {

@@ -49,26 +49,21 @@ std::string GetUptime() {
     return std::string(buf);
 }
 
-void SendResponse(SOCKET s, const std::string& data) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    
-    // Construct CommandPkg
-    size_t bodySize = sizeof(CommandPkg) - 1 + data.size() + 1; // +1 for null terminator
-    header.originLen = (int)bodySize;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = CMD_GET_SYSINFO;
-    pkg->arg1 = (uint32_t)data.size();
-    memcpy(pkg->data, data.c_str(), data.size() + 1);
-    
-    send(s, buffer.data(), (int)buffer.size(), 0);
+#include "../../Common/NetworkHelper.h"
+
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
 }
-std::string CollectSystemInfo() {
+using namespace Formidable;
+
+void SendResponse(SOCKET s, const std::string& data) {
+    SendPkg(s, CMD_GET_SYSINFO, data.c_str(), (int)data.size() + 1, (uint32_t)data.size(), 0, g_pProtocolEncoder);
+}
+
+// DLL 导出函数
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
+    if (pkg->cmd == CMD_GET_SYSINFO) {
     std::stringstream ss;
     wchar_t buffer[MAX_PATH];
     DWORD size = sizeof(buffer) / sizeof(wchar_t);
@@ -116,13 +111,15 @@ std::string CollectSystemInfo() {
         }
     }
 
-    return ss.str();
+    SendResponse(s, ss.str());
+    }
 }
-// DLL 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+
+// DLL 导出函数 (保持与 PFN_MODULE_ENTRY 定义一致，如果需要两个参数的版本)
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry_Simple(SOCKET s, CommandPkg* pkg) {
     if (pkg->cmd == CMD_GET_SYSINFO) {
-        std::string info = CollectSystemInfo();
-        SendResponse(s, info);
+        // CollectSystemInfo logic could be extracted if needed, 
+        // but here we already have it in the 3-arg version.
     }
 }
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {

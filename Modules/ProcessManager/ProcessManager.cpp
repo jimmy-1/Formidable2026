@@ -18,6 +18,7 @@
 #include <vector>
 #include <map>
 #include "../../Common/Config.h"
+#include "../../Common/NetworkHelper.h"
 #include "../../Common/Utils.h"
 #include <sddl.h>
 
@@ -106,31 +107,15 @@ bool GetProcessOwner(HANDLE hProcess, std::string& owner) {
     return false;
 }
 
-void SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-    
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = arg1;
-    pkg->arg2 = arg2;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-    
-    const char* pData = buffer.data();
-    int remaining = (int)buffer.size();
-    while (remaining > 0) {
-        int sent = send(s, pData, remaining, 0);
-        if (sent == SOCKET_ERROR) break;
-        pData += sent;
-        remaining -= sent;
-    }
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
+using namespace Formidable;
+
+bool SendResponse(SOCKET s, uint32_t cmd, uint32_t arg1, uint32_t arg2, const void* data, int len) {
+    if (s == INVALID_SOCKET) return false;
+    SendPkg(s, cmd, data, len, arg1, arg2, g_pProtocolEncoder);
+    return true;
 }
 
 void ListProcesses(SOCKET s) {
@@ -289,7 +274,8 @@ void KillProcess(SOCKET s, uint32_t pid) {
 }
 
 // DLL 导出函数
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
     if (pkg->cmd == CMD_LOAD_MODULE || pkg->cmd == CMD_PROCESS_LIST) {
         ListProcesses(s);
     } else if (pkg->cmd == CMD_PROCESS_MODULES) {

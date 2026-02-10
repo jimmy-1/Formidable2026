@@ -115,9 +115,10 @@ namespace Formidable {
                 std::string utf8 = WideToUTF8(wBuf);
                 strncpy(cachedStatic.computerName, utf8.c_str(), sizeof(cachedStatic.computerName) - 1);
             } else {
-                char envBuf[MAX_PATH];
-                if (GetEnvironmentVariableA("COMPUTERNAME", envBuf, MAX_PATH)) {
-                    strncpy(cachedStatic.computerName, envBuf, sizeof(cachedStatic.computerName) - 1);
+                wchar_t envBuf[MAX_PATH];
+                if (GetEnvironmentVariableW(L"COMPUTERNAME", envBuf, MAX_PATH)) {
+                    std::string utf8 = WideToUTF8(envBuf);
+                    strncpy(cachedStatic.computerName, utf8.c_str(), sizeof(cachedStatic.computerName) - 1);
                 }
             }
             
@@ -126,9 +127,10 @@ namespace Formidable {
                 std::string utf8 = WideToUTF8(wBuf);
                 strncpy(cachedStatic.userName, utf8.c_str(), sizeof(cachedStatic.userName) - 1);
             } else {
-                char envBuf[MAX_PATH];
-                if (GetEnvironmentVariableA("USERNAME", envBuf, MAX_PATH)) {
-                    strncpy(cachedStatic.userName, envBuf, sizeof(cachedStatic.userName) - 1);
+                wchar_t envBuf[MAX_PATH];
+                if (GetEnvironmentVariableW(L"USERNAME", envBuf, MAX_PATH)) {
+                    std::string utf8 = WideToUTF8(envBuf);
+                    strncpy(cachedStatic.userName, utf8.c_str(), sizeof(cachedStatic.userName) - 1);
                 }
             }
 

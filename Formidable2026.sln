@@ -17,6 +17,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Formidable2026", "Master\Fo
 		{9BE0B2B4-1CF4-4123-A38F-9746F6091934} = {9BE0B2B4-1CF4-4123-A38F-9746F6091934}
 		{A2B3C4D5-E6F7-480A-B1C2-D3E4F5A6B7C8} = {A2B3C4D5-E6F7-480A-B1C2-D3E4F5A6B7C8}
 		{B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8} = {B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8}
+		{AABBCCDD-1234-5678-90AB-CDEF12345678} = {AABBCCDD-1234-5678-90AB-CDEF12345678}
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Client", "ClientSide\Client\Client.vcxproj", "{3F756E52-23C2-4EE4-A184-37CF788D50A7}"
@@ -44,6 +45,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ModuleBackgroundScreen", "Modules\BackgroundScreen\ModuleBackgroundScreen.vcxproj", "{A2B3C4D5-E6F7-480A-B1C2-D3E4F5A6B7C8}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FormidableNim", "ClientSide\FormidableNim\FormidableNim.vcxproj", "{B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FormidableLoader", "Loader\FormidableLoader.vcxproj", "{AABBCCDD-1234-5678-90AB-CDEF12345678}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -165,6 +168,14 @@ Global
 		{B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8}.Release|Win32.Build.0 = Release|Win32
 		{B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8}.Release|x64.ActiveCfg = Release|x64
 		{B2C3D4E5-F6A7-4890-B1C2-D3E4F5A6B7C8}.Release|x64.Build.0 = Release|x64
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Debug|Win32.ActiveCfg = Release|Win32
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Debug|Win32.Build.0 = Release|Win32
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Debug|x64.ActiveCfg = Release|x64
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Debug|x64.Build.0 = Release|x64
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Release|Win32.ActiveCfg = Release|Win32
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Release|Win32.Build.0 = Release|Win32
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Release|x64.ActiveCfg = Release|x64
+		{AABBCCDD-1234-5678-90AB-CDEF12345678}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

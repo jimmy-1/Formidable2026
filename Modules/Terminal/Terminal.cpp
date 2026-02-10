@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 #include "../../Common/Config.h"
+#include "../../Common/NetworkHelper.h"
 
 using namespace Formidable;
 
@@ -42,23 +43,13 @@ static HANDLE hThreadRead = NULL;
 static SOCKET g_socket = INVALID_SOCKET;
 static bool bRunning = false;
 
+namespace Formidable {
+    ProtocolEncoder* g_pProtocolEncoder = nullptr;
+}
+using namespace Formidable;
+
 void SendResponse(SOCKET s, uint32_t cmd, const void* data, int len) {
-    PkgHeader header;
-    memcpy(header.flag, "FRMD26?", 7);
-    header.originLen = sizeof(CommandPkg) - 1 + len;
-    header.totalLen = sizeof(PkgHeader) + header.originLen;
-
-    std::vector<char> buffer(header.totalLen);
-    memcpy(buffer.data(), &header, sizeof(PkgHeader));
-
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = len;
-    if (len > 0 && data) {
-        memcpy(pkg->data, data, len);
-    }
-
-    send(s, buffer.data(), (int)buffer.size(), 0);
+    SendPkg(s, cmd, data, len, 0, 0, g_pProtocolEncoder);
 }
 
 
@@ -217,7 +208,8 @@ bool OpenTerminal(SOCKET s) {
 }
 
 // Entry point for the DLL
-extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg) {
+extern "C" __declspec(dllexport) void WINAPI ModuleEntry(SOCKET s, CommandPkg* pkg, ProtocolEncoder* encoder) {
+    g_pProtocolEncoder = encoder;
     if (pkg->cmd == CMD_LOAD_MODULE || pkg->cmd == CMD_TERMINAL_OPEN) {
         if (OpenTerminal(s)) {
             std::string msg = "Interactive Terminal Opened\r\n";

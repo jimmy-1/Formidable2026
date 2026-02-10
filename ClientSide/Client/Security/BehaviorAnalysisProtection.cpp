@@ -28,33 +28,11 @@ namespace Security {
 
 // Helper for Anti-VM
 bool IsRunningInVM() {
-    // 1. Check CPUID
-    int cpuInfo[4] = { 0 };
-    __cpuid(cpuInfo, 1);
-    if ((cpuInfo[2] >> 31) & 1) return true; // Hypervisor present bit
-
-    // 2. Check RAM size (< 2GB is suspicious for modern Windows)
-    MEMORYSTATUSEX memInfo;
-    memInfo.dwLength = sizeof(MEMORYSTATUSEX);
-    GlobalMemoryStatusEx(&memInfo);
-    if (memInfo.ullTotalPhys / 1024 / 1024 < 2048) return true;
-
-    // 3. Check CPU Cores (< 2 is suspicious)
-    SYSTEM_INFO sysInfo;
-    GetSystemInfo(&sysInfo);
-    if (sysInfo.dwNumberOfProcessors < 2) return true;
-
     return false;
 }
 
 // Helper for Anti-Debug
 bool IsDebugged() {
-    if (IsDebuggerPresent()) return true;
-    
-    BOOL bRemoteDebug = FALSE;
-    CheckRemoteDebuggerPresent(GetCurrentProcess(), &bRemoteDebug);
-    if (bRemoteDebug) return true;
-
     return false;
 }
 
@@ -64,18 +42,8 @@ void BehaviorAnalysisProtection::InitializeProtection() {
 }
 
 void BehaviorAnalysisProtection::ProtectAgainstAnalysis() {
-    if (IsDebugged()) {
-        LOG_WARNING("Debugger detected! Exiting.");
-        // Subtle exit or infinite loop
-        ExitProcess(0); 
-    }
-
-    if (IsRunningInVM()) {
-        LOG_WARNING("VM detected! Continuing with caution.");
-        // Decide whether to run or reduce functionality
-        // For now, we continue but might log or change behavior
-        // ExitProcess(0); // Optional: Exit if VM detected
-    }
+    // 已禁用：主动反调试/反虚拟机逻辑是 Sabsik.FL.A!ml 的主要特征之一
+    // 在现代 Win11/Defender 环境下，这些行为通常会适得其反
 }
 
 // APIHooking

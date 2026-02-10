@@ -106,6 +106,7 @@ INT_PTR CALLBACK ProcessDialog::DlgProc(HWND hDlg, UINT message, WPARAM wParam, 
                 }
 
                 ListView_SortItems(hList, ListViewCompareProc, (LPARAM)&g_SortInfo[hList]);
+                UpdateListViewSortHeader(hList, g_SortInfo[hList].column, g_SortInfo[hList].ascending);
             }
         }
         break;

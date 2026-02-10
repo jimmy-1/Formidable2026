@@ -12,6 +12,7 @@
 #include "../../thirdparty/Include/HPSocket/HPSocket.h"
 #include "../NetworkHelper.h"
 #include "../../Common/ClientTypes.h"
+#include "../../Common/ProtocolEncoder.h"
 #include "../GlobalState.h"
 #include "../StringUtils.h"
 #include "../MainWindow.h"
@@ -122,34 +123,51 @@ bool NetworkManager::SendToClient(std::shared_ptr<ConnectedClient> client, const
     return s_pServer->Send(client->connId, (const BYTE*)data, length);
 }
 
-// 发送命令到客户端
-bool NetworkManager::SendCommand(uint32_t clientId, uint32_t cmd, uint32_t arg1, uint32_t arg2, const std::string& data) {
-    std::shared_ptr<ConnectedClient> client;
-    {
-        std::lock_guard<std::mutex> lock(g_ClientsMutex);
-        if (g_Clients.count(clientId)) client = g_Clients[clientId];
-    }
-    if (!client) return false;
+    // 发送命令到客户端
+    bool NetworkManager::SendCommand(uint32_t clientId, uint32_t cmd, uint32_t arg1, uint32_t arg2, const std::string& data) {
+        std::shared_ptr<ConnectedClient> client;
+        {
+            std::lock_guard<std::mutex> lock(g_ClientsMutex);
+            if (g_Clients.count(clientId)) client = g_Clients[clientId];
+        }
+        if (!client) return false;
 
-    size_t bodySize = sizeof(CommandPkg) + data.size();
-    std::vector<char> buffer(sizeof(PkgHeader) + bodySize);
-    
-    PkgHeader* header = (PkgHeader*)buffer.data();
-    memcpy(header->flag, "FRMD26?", 7);
-    header->originLen = (int)bodySize;
-    header->totalLen = (int)buffer.size();
-    
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
-    pkg->cmd = cmd;
-    pkg->arg1 = arg1;
-    pkg->arg2 = arg2;
-    
-    if (!data.empty()) {
-        memcpy(pkg->data, data.data(), data.size());
+        size_t bodySize = sizeof(CommandPkg) + data.size();
+        
+        ProtocolEncoder* encoder = GetEncoderByType(client->iHeaderEnc);
+        
+        std::string head = encoder->GetHead();
+        int flagLen = encoder->GetFlagLen();
+        int headLen = encoder->GetHeadLen();
+        
+        int totalLen = (int)(headLen + bodySize);
+        int originLen = (int)bodySize;
+        
+        std::vector<char> buffer(totalLen);
+        encoder->GetHeaderData((unsigned char*)buffer.data());
+        memcpy(buffer.data() + flagLen, &totalLen, sizeof(int));
+        memcpy(buffer.data() + flagLen + sizeof(int), &originLen, sizeof(int));
+        
+        CommandPkg* pkg = (CommandPkg*)(buffer.data() + headLen);
+        pkg->cmd = cmd;
+        pkg->arg1 = arg1;
+        pkg->arg2 = arg2;
+        
+        if (!data.empty()) {
+            memcpy(pkg->data, data.data(), data.size());
+        }
+        
+        unsigned char* pKey = nullptr;
+        if (encoder->GetHead() == "HELL") {
+            pKey = (unsigned char*)buffer.data() + 6;
+        }
+
+        encoder->Encode((unsigned char*)buffer.data() + headLen, (int)bodySize, pKey);
+        
+        bool ret = SendToClient(client, buffer.data(), (int)buffer.size());
+        delete encoder;
+        return ret;
     }
-    
-    return SendToClient(client, buffer.data(), (int)buffer.size());
-}
 
 // 发送模块到客户端
 bool NetworkManager::SendModule(uint32_t clientId, uint32_t cmd, const std::wstring& dllName, uint32_t arg2) {
@@ -212,20 +230,37 @@ bool NetworkManager::SendModule(uint32_t clientId, uint32_t cmd, const std::wstr
 data_ready:
     size_t fileSize = dllData.size();
     size_t bodySize = sizeof(CommandPkg) + fileSize;
-    std::vector<char> buffer(sizeof(PkgHeader) + bodySize);
     
-    PkgHeader* header = (PkgHeader*)buffer.data();
-    memcpy(header->flag, "FRMD26?", 7);
-    header->originLen = (int)bodySize;
-    header->totalLen = (int)buffer.size();
+    ProtocolEncoder* encoder = GetEncoderByType(client->iHeaderEnc);
     
-    CommandPkg* pkg = (CommandPkg*)(buffer.data() + sizeof(PkgHeader));
+    std::string head = encoder->GetHead();
+    int flagLen = encoder->GetFlagLen();
+    int headLen = encoder->GetHeadLen();
+    
+    int totalLen = (int)(headLen + bodySize);
+    int originLen = (int)bodySize;
+    
+    std::vector<char> buffer(totalLen);
+    encoder->GetHeaderData((unsigned char*)buffer.data());
+    memcpy(buffer.data() + flagLen, &totalLen, sizeof(int));
+    memcpy(buffer.data() + flagLen + sizeof(int), &originLen, sizeof(int));
+    
+    CommandPkg* pkg = (CommandPkg*)(buffer.data() + headLen);
     pkg->cmd = cmd;
     pkg->arg1 = (uint32_t)fileSize;
     pkg->arg2 = arg2;
     memcpy(pkg->data, dllData.data(), fileSize);
     
-    return SendToClient(client, buffer.data(), (int)buffer.size());
+    unsigned char* pKey = nullptr;
+    if (encoder->GetHead() == "HELL") {
+        pKey = (unsigned char*)buffer.data() + 6;
+    }
+
+    encoder->Encode((unsigned char*)buffer.data() + headLen, (int)bodySize, pKey);
+    
+    bool ret = SendToClient(client, buffer.data(), (int)buffer.size());
+    delete encoder;
+    return ret;
 }
 
 // 断开客户端
@@ -291,30 +326,54 @@ void NetworkManager::OnReceive(CONNID connId, const BYTE* pData, int iLength) {
         client->recvBuffer.insert(client->recvBuffer.end(), pData, pData + iLength);
 
         // 循环处理缓冲区中所有完整的包
-        while (client->recvBuffer.size() >= sizeof(PkgHeader)) {
-            PkgHeader* header = (PkgHeader*)client->recvBuffer.data();
-            
-            // 验证包头标志
-            if (memcmp(header->flag, "FRMD26?", 7) != 0) {
+        while (client->recvBuffer.size() >= 5) { // 最小标识符长度
+            ProtocolEncoder* encoder = CheckHead((const char*)client->recvBuffer.data(), (int)client->recvBuffer.size());
+            if (!encoder) {
                 // 非法数据，清空缓冲区并断开
                 client->recvBuffer.clear();
                 s_pServer->Disconnect(connId);
                 break;
             }
+            
+            int flagLen = encoder->GetFlagLen();
+            int headLen = encoder->GetHeadLen();
+            
+            if (client->recvBuffer.size() < (size_t)headLen) {
+                delete encoder;
+                break; // 等待头部完整
+            }
 
-            int totalPkgLen = header->totalLen;
+            int totalPkgLen = *(int*)(client->recvBuffer.data() + flagLen);
             if (client->recvBuffer.size() >= (size_t)totalPkgLen) {
+                int bodyLen = *(int*)(client->recvBuffer.data() + flagLen + sizeof(int));
+                
                 // 提取包体数据
-                const BYTE* pkgBody = client->recvBuffer.data() + sizeof(PkgHeader);
-                int bodyLen = header->originLen;
+                std::vector<BYTE> body(bodyLen);
+                memcpy(body.data(), client->recvBuffer.data() + headLen, bodyLen);
+
+                // 解密
+                unsigned char* pKey = nullptr;
+                if (encoder->GetHead() == "HELL") {
+                    pKey = (unsigned char*)client->recvBuffer.data() + 6;
+                }
+                encoder->Decode(body.data(), bodyLen, pKey);
+
+                // 更新客户端加密类型
+                if (encoder->GetHead() == "Shine") {
+                    client->iHeaderEnc = PROTOCOL_SHINE;
+                } else if (encoder->GetHead() == "HELL") {
+                    client->iHeaderEnc = PROTOCOL_HELL;
+                }
 
                 // 处理包体数据
-                Formidable::Core::CommandHandler::HandlePacket(clientId, pkgBody, bodyLen);
+                Formidable::Core::CommandHandler::HandlePacket(clientId, body.data(), bodyLen);
 
                 // 从缓冲区移除已处理的数据
                 client->recvBuffer.erase(client->recvBuffer.begin(), client->recvBuffer.begin() + totalPkgLen);
+                delete encoder;
             } else {
                 // 数据包不完整，等待下一次接收
+                delete encoder;
                 break;
             }
         }
@@ -335,11 +394,13 @@ void NetworkManager::OnClose(CONNID connId) {
     
     if (clientId > 0) {
         std::shared_ptr<ConnectedClient> client;
+        std::string removedGroup;
         {
             std::lock_guard<std::mutex> lock(g_ClientsMutex);
             auto it = g_Clients.find(clientId);
             if (it != g_Clients.end()) {
                 client = it->second;
+                removedGroup = WideToUTF8(client->group);
                 g_Clients.erase(it);
             }
         }
@@ -362,6 +423,9 @@ void NetworkManager::OnClose(CONNID connId) {
             }
         }
         
+        if (!removedGroup.empty()) {
+            CheckAndRemoveEmptyGroup(removedGroup);
+        }
         UpdateStatusBar();
     }
 }
